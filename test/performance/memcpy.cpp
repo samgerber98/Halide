@@ -1,20 +1,12 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
-#include "halide_test_dirs.h"
-
-#include <chrono>
+#include "benchmark.h"
 #include <cstdio>
+#include <chrono>
 
 using namespace Halide;
-using namespace Halide::Tools;
+
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
-
     ImageParam src(UInt(8), 1);
     Func dst;
     Var x;
@@ -22,7 +14,7 @@ int main(int argc, char **argv) {
 
     dst.vectorize(x, 32, TailStrategy::GuardWithIf);
 
-    dst.compile_to_assembly(Internal::get_test_tmp_dir() + "halide_memcpy.s", {src}, "halide_memcpy");
+    dst.compile_to_assembly("halide_memcpy.s", {src}, "halide_memcpy");
     dst.compile_jit();
 
     const int32_t buffer_size = 12345678;
@@ -32,11 +24,11 @@ int main(int argc, char **argv) {
 
     src.set(input);
 
-    double t1 = benchmark([&]() {
+    double t1 = benchmark(10, 10, [&]() {
         dst.realize(output);
     });
 
-    double t2 = benchmark([&]() {
+    double t2 = benchmark(10, 10, [&]() {
         memcpy(output.data(), input.data(), input.width());
     });
 
@@ -46,7 +38,7 @@ int main(int argc, char **argv) {
     // memcpy will win by a little bit for large inputs because it uses streaming stores
     if (t1 > t2 * 3) {
         printf("Halide memcpy is slower than it should be.\n");
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

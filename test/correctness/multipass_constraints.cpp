@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
     Func out("out");
     Var x("x"), y("y");
 
-    out(x, y) = in(x + 1, y + 1) + in(x - 1, y - 1);
+    out(x, y) = in(x+1, y+1) + in(x-1, y-1);
     out(x, y) += 3.0f;
     out.update().vectorize(x, 4);
 
@@ -43,9 +43,8 @@ int main(int argc, char **argv) {
                out_buf.dim(0).min(), out_buf.dim(0).extent(),
                out_buf.dim(1).min(), out_buf.dim(1).extent());
 
-        return 1;
+        return -1;
     }
 
-    printf("Success!\n");
     return 0;
 }

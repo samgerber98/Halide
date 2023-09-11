@@ -10,10 +10,12 @@
 #include "HalideRuntimeHexagonHost.h"
 #include "HalideRuntimeMetal.h"
 #include "HalideRuntimeOpenCL.h"
+#include "HalideRuntimeOpenGL.h"
 #include "HalideRuntimeOpenGLCompute.h"
 #include "HalideRuntimeQurt.h"
 
+
 int main(int argc, char **argv) {
-    printf("Success!\n");
+    printf("Success!");
     return 0;
 }

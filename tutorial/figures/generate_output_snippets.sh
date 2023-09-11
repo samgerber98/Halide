@@ -1,8 +1,8 @@
 for f in ../lesson_*.cpp; do
     # Figure out which source lines contain a realize call or other print we want to capture
-    INTERESTING_LINES=$(egrep -n 'tick\(|[.]realize\(|print_loop_nest\(\)|Printing a complex Expr' $f  | grep -v ": *//" | cut -d':' -f1)
+    LINES=$(egrep -n 'tick\(|[.]realize\(|print_loop_nest\(\)|Printing a complex Expr' $f  | grep -v ": *//" | cut -d':' -f1)
 
-    echo $INTERESTING_LINES
+    echo $LINES
 
     FILENAME=${f/../tutorial}
     LESSON=$(echo $f | sed "s/.*\(lesson.*\).cpp/\1/")
@@ -21,7 +21,7 @@ for f in ../lesson_*.cpp; do
     echo "set args -s 2> stderr.txt > stdout.txt" >> gdb_script.txt
     echo "set height 0" >> gdb_script.txt
     echo "start" >> gdb_script.txt
-    for l in ${INTERESTING_LINES} ; do
+    for l in $LINES; do
         echo advance ${FILENAME}:${l} >> gdb_script.txt
         echo call "fflush(stdout)" >> gdb_script.txt
         echo call "fflush(stderr)" >> gdb_script.txt
@@ -37,6 +37,7 @@ for f in ../lesson_*.cpp; do
         echo call "fflush(stderr)" >> gdb_script.txt
     done
 
+
     cd ..
     LD_LIBRARY_PATH=../bin gdb ../bin/tutorial_${LESSON} < figures/gdb_script.txt
     mv stdout.txt stderr.txt figures/
@@ -44,7 +45,7 @@ for f in ../lesson_*.cpp; do
 
     # get the output for each realize call
     rm -f ${LESSON_ROOT}_output_*.txt
-    for l in ${INTERESTING_LINES}; do
+    for l in $LINES; do
         F=${LESSON_ROOT}_output_${l}.txt
         cat stdout.txt | sed -n "/BEGIN_REALIZE_${l}_/,/END_REALIZE_${l}_/p" | grep -v _REALIZE > ${F}
         cat stderr.txt | sed -n "/BEGIN_REALIZE_${l}_/,/END_REALIZE_${l}_/p" | grep -v _REALIZE >> ${F}

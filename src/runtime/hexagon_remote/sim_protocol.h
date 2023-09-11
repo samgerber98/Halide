@@ -6,10 +6,10 @@ enum {
     None = 0,
     Alloc,
     Free,
-    LoadLibrary,
+    InitKernels,
     GetSymbol,
     Run,
-    ReleaseLibrary,
+    ReleaseKernels,
     Break,
 };
 }

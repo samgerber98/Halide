@@ -1,5 +1,5 @@
-#include "Halide.h"
 #include <stdio.h>
+#include "Halide.h"
 
 using namespace Halide;
 
@@ -9,7 +9,7 @@ bool test_type() {
     Func f;
     Var x;
     f(x) = cast<T>(1);
-    Buffer<T> im = f.realize({10});
+    Buffer<T> im = f.realize(10);
 
     if (f.value().type() != t) {
         std::cout << "Function was defined with type " << t << " but has type " << f.value().type() << "\n";
@@ -55,6 +55,6 @@ int main(int argc, char **argv) {
         printf("Success!\n");
         return 0;
     } else {
-        return 1;
+        return -1;
     }
 }

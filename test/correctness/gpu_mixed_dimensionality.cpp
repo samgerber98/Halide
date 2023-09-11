@@ -6,7 +6,7 @@ using namespace Halide;
 int main(int argc, char **argv) {
     Target target = get_jit_target_from_environment();
     if (!target.has_gpu_feature() && !target.has_feature(Target::OpenGLCompute)) {
-        printf("[SKIP] No GPU target enabled.\n");
+        printf("No gpu target enabled. Skipping test.\n");
         return 0;
     }
 
@@ -27,15 +27,12 @@ int main(int argc, char **argv) {
     out.update().gpu_tile(x, y, xi, yi, 4, 4);
     h.compute_at(out, x).gpu_threads(x, y);
     h.update().gpu_threads(x);
-    // TODO: NormalizeDimensionality in FuseGPUThreadLoops.cpp doesn't work in the following case.
-    // g.compute_at(h, y).gpu_threads(x);
-    // g.update();
-    g.compute_at(h, x);
+    g.compute_at(h, y).gpu_threads(x);
     g.update();
     f.compute_at(g, x);
     f.update();
 
-    Buffer<int> o = out.realize({64, 64, 64});
+    Buffer<int> o = out.realize(64, 64, 64);
 
     for (int z = 0; z < 64; z++) {
         for (int y = 0; y < 64; y++) {
@@ -44,7 +41,7 @@ int main(int argc, char **argv) {
                 if (o(x, y, z) != correct) {
                     printf("out(%d, %d, %d) = %d instead of %d\n",
                            x, y, z, o(x, y, z), correct);
-                    return 1;
+                    return -1;
                 }
             }
         }

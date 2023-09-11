@@ -5,7 +5,7 @@
  * Methods to test Exprs and Stmts for equality of value
  */
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
@@ -13,8 +13,8 @@ namespace Internal {
 /** A compare struct suitable for use in std::map and std::set that
  * computes a lexical ordering on IR nodes. */
 struct IRDeepCompare {
-    bool operator()(const Expr &a, const Expr &b) const;
-    bool operator()(const Stmt &a, const Stmt &b) const;
+    EXPORT bool operator()(const Expr &a, const Expr &b) const;
+    EXPORT bool operator()(const Stmt &a, const Stmt &b) const;
 };
 
 /** Lossily track known equal exprs with a cache. On collision, the
@@ -35,7 +35,7 @@ private:
         uint64_t pb = (uint64_t)(b.get());
         uint64_t mix = (pa + pb) + (pa ^ pb);
         mix ^= (mix >> bits);
-        mix ^= (mix >> (bits * 2));
+        mix ^= (mix >> (bits*2));
         uint32_t bottom = mix & ((1 << bits) - 1);
         return bottom;
     }
@@ -57,16 +57,14 @@ public:
     }
 
     void clear() {
-        for (auto &entry : entries) {
-            entry.a = Expr();
-            entry.b = Expr();
+        for (size_t i = 0; i < entries.size(); i++) {
+            entries[i].a = Expr();
+            entries[i].b = Expr();
         }
     }
 
-    IRCompareCache() = default;
-    IRCompareCache(int b)
-        : bits(b), entries(static_cast<size_t>(1) << bits) {
-    }
+    IRCompareCache() {}
+    IRCompareCache(int b) : bits(b), entries(static_cast<size_t>(1) << bits) {}
 };
 
 /** A wrapper about Exprs so that they can be deeply compared with a
@@ -94,15 +92,13 @@ if (m.contains(ExprWithCompareCache(query, &cache))) {...}
  */
 struct ExprWithCompareCache {
     Expr expr;
-    mutable IRCompareCache *cache = nullptr;
+    mutable IRCompareCache *cache;
 
-    ExprWithCompareCache() = default;
-    ExprWithCompareCache(const Expr &e, IRCompareCache *c)
-        : expr(e), cache(c) {
-    }
+    ExprWithCompareCache() : cache(nullptr) {}
+    ExprWithCompareCache(const Expr &e, IRCompareCache *c) : expr(e), cache(c) {}
 
     /** The comparison uses (and updates) the cache */
-    bool operator<(const ExprWithCompareCache &other) const;
+    EXPORT bool operator<(const ExprWithCompareCache &other) const;
 };
 
 /** Compare IR nodes for equality of value. Traverses entire IR
@@ -110,21 +106,17 @@ struct ExprWithCompareCache {
  * comparing non-CSE'd Exprs, use graph_equal, which is safe for nasty
  * graphs of IR nodes. */
 // @{
-bool equal(const Expr &a, const Expr &b);
-bool equal(const Stmt &a, const Stmt &b);
-bool graph_equal(const Expr &a, const Expr &b);
-bool graph_equal(const Stmt &a, const Stmt &b);
+EXPORT bool equal(const Expr &a, const Expr &b);
+EXPORT bool equal(const Stmt &a, const Stmt &b);
+EXPORT bool graph_equal(const Expr &a, const Expr &b);
+EXPORT bool graph_equal(const Stmt &a, const Stmt &b);
 // @}
 
-/** Order unsanitized IRNodes for use in a map key */
-// @{
-bool graph_less_than(const Expr &a, const Expr &b);
-bool graph_less_than(const Stmt &a, const Stmt &b);
-// @}
 
-void ir_equality_test();
 
-}  // namespace Internal
-}  // namespace Halide
+EXPORT void ir_equality_test();
+
+}
+}
 
 #endif

@@ -1,14 +1,20 @@
 #include "Halide.h"
 #include <stdio.h>
 
-// An extern stage that translates.
-extern "C" HALIDE_EXPORT_SYMBOL int translate(halide_buffer_t *in, int dx, int dy, halide_buffer_t *out) {
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
 
-    if (in->is_bounds_query()) {
-        in->dim[0].min = out->dim[0].min + dx;
-        in->dim[1].min = out->dim[1].min + dy;
-        in->dim[0].extent = out->dim[0].extent;
-        in->dim[1].extent = out->dim[1].extent;
+// An extern stage that translates.
+extern "C" DLLEXPORT int translate(buffer_t *in, int dx, int dy, buffer_t *out) {
+
+    if (in->host == nullptr) {
+        in->min[0] = out->min[0] + dx;
+        in->min[1] = out->min[1] + dy;
+        in->extent[0] = out->extent[0];
+        in->extent[1] = out->extent[1];
     } else {
         Halide::Runtime::Buffer<uint8_t> out_buf(*out);
         out_buf.translate(dx, dy);
@@ -55,7 +61,7 @@ int main(int argc, char **argv) {
 
         f.define_extern("translate", args, UInt(8), 2);
 
-        f.infer_input_bounds({W, H});
+        f.infer_input_bounds(W, H);
 
         // Evaluating the output over [0, 29] x [0, 19] requires the input over [3, 32] x [7, 26]
         check(input, 3, W, 7, H);
@@ -86,10 +92,11 @@ int main(int argc, char **argv) {
         Var xi, yi;
         g.tile(x, y, xi, yi, 2, 4);
 
-        g.infer_input_bounds({W, H});
+        g.infer_input_bounds(W, H);
 
         check(input, 3, W + 5, 7, H + 10);
     }
+
 
     // Define a pipeline that uses an input image in an extern stage
     // and an internal stage with different bounds required for each.
@@ -112,9 +119,8 @@ int main(int argc, char **argv) {
         f1.compute_at(g, y);
         f2.compute_at(g, x);
         g.reorder(y, x).vectorize(y, 4);
-        g.update().unscheduled();
 
-        g.infer_input_bounds({W, H});
+        g.infer_input_bounds(W, H);
 
         check(input, 3, W + 5, 7, H + 10);
     }

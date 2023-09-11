@@ -7,10 +7,10 @@
  * pointers.
  */
 
+#include <stdlib.h>
 #include <atomic>
-#include <cstdlib>
 
-#include "runtime/HalideRuntime.h"  // for HALIDE_ALWAYS_INLINE
+#include "Util.h"
 
 namespace Halide {
 namespace Internal {
@@ -18,20 +18,11 @@ namespace Internal {
 /** A class representing a reference count to be used with IntrusivePtr */
 class RefCount {
     std::atomic<int> count;
-
 public:
-    RefCount() noexcept
-        : count(0) {
-    }
-    int increment() {
-        return ++count;
-    }  // Increment and return new value
-    int decrement() {
-        return --count;
-    }  // Decrement and return new value
-    bool is_const_zero() const {
-        return count == 0;
-    }
+    RefCount() : count(0) {}
+    int increment() {return ++count;} // Increment and return new value
+    int decrement() {return --count;} // Decrement and return new value
+    bool is_zero() const {return count == 0;}
 };
 
 /**
@@ -45,14 +36,12 @@ public:
  * define something like this in MyClass.cpp (assuming MyClass has
  * a field: mutable RefCount ref_count):
  *
- * template<> RefCount &ref_count<MyClass>(const MyClass *c) noexcept {return c->ref_count;}
+ * template<> RefCount &ref_count<MyClass>(const MyClass *c) {return c->ref_count;}
  * template<> void destroy<MyClass>(const MyClass *c) {delete c;}
  */
 // @{
-template<typename T>
-RefCount &ref_count(const T *t) noexcept;
-template<typename T>
-void destroy(const T *t);
+template<typename T> EXPORT RefCount &ref_count(const T *t);
+template<typename T> EXPORT void destroy(const T *t);
 // @}
 
 /** Intrusive shared pointers have a reference count (a
@@ -67,11 +56,12 @@ void destroy(const T *t);
 template<typename T>
 struct IntrusivePtr {
 private:
+
     void incref(T *p) {
         if (p) {
             ref_count(p).increment();
         }
-    }
+    };
 
     void decref(T *p) {
         if (p) {
@@ -88,7 +78,7 @@ private:
     }
 
 protected:
-    T *ptr = nullptr;
+    T *ptr;
 
 public:
     /** Access the raw pointer in a variety of ways.
@@ -113,34 +103,23 @@ public:
         decref(ptr);
     }
 
-    HALIDE_ALWAYS_INLINE
-    IntrusivePtr() = default;
+    IntrusivePtr() : ptr(nullptr) {
+    }
 
-    HALIDE_ALWAYS_INLINE
-    IntrusivePtr(T *p)
-        : ptr(p) {
+    IntrusivePtr(T *p) : ptr(p) {
         incref(ptr);
     }
 
-    HALIDE_ALWAYS_INLINE
-    IntrusivePtr(const IntrusivePtr<T> &other) noexcept
-        : ptr(other.ptr) {
+    IntrusivePtr(const IntrusivePtr<T> &other) : ptr(other.ptr) {
         incref(ptr);
     }
 
-    HALIDE_ALWAYS_INLINE
-    IntrusivePtr(IntrusivePtr<T> &&other) noexcept
-        : ptr(other.ptr) {
+    IntrusivePtr(IntrusivePtr<T> &&other) : ptr(other.ptr) {
         other.ptr = nullptr;
     }
 
-    // NOLINTNEXTLINE(bugprone-unhandled-self-assignment)
     IntrusivePtr<T> &operator=(const IntrusivePtr<T> &other) {
-        // Same-ptr but different-this happens frequently enough
-        // to check for (see https://github.com/halide/Halide/pull/5412)
-        if (other.ptr == ptr) {
-            return *this;
-        }
+        if (other.ptr == ptr) return *this;
         // Other can be inside of something owned by this, so we
         // should be careful to incref other before we decref
         // ourselves.
@@ -151,31 +130,29 @@ public:
         return *this;
     }
 
-    IntrusivePtr<T> &operator=(IntrusivePtr<T> &&other) noexcept {
+    IntrusivePtr<T> &operator=(IntrusivePtr<T> &&other) {
         std::swap(ptr, other.ptr);
         return *this;
     }
 
     /* Handles can be null. This checks that. */
-    HALIDE_ALWAYS_INLINE
     bool defined() const {
         return ptr != nullptr;
     }
 
     /* Check if two handles point to the same ptr. This is
      * equality of reference, not equality of value. */
-    HALIDE_ALWAYS_INLINE
     bool same_as(const IntrusivePtr &other) const {
         return ptr == other.ptr;
     }
 
-    HALIDE_ALWAYS_INLINE
-    bool operator<(const IntrusivePtr<T> &other) const {
+    bool operator <(const IntrusivePtr<T> &other) const {
         return ptr < other.ptr;
     }
+
 };
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

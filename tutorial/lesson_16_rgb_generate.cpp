@@ -6,13 +6,13 @@
 
 // On linux or os x, you can compile and run it like so:
 
-// g++ lesson_16_rgb_generate.cpp <path/to/tools/halide_image_io.h>/GenGen.cpp -g -std=c++17 -fno-rtti -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -lpthread -ldl -o lesson_16_generate
-// export LD_LIBRARY_PATH=<path/to/libHalide.so>   # For linux
-// export DYLD_LIBRARY_PATH=<path/to/libHalide.dylib> # For OS X
-// ./lesson_16_generate -g brighten -o . -f brighten_planar      target=host layout=planar
-// ./lesson_16_generate -g brighten -o . -f brighten_interleaved target=host layout=interleaved
-// ./lesson_16_generate -g brighten -o . -f brighten_either      target=host layout=either
-// ./lesson_16_generate -g brighten -o . -f brighten_specialized target=host layout=specialized
+// g++ lesson_16_rgb_generate.cpp ../tools/GenGen.cpp -g -std=c++11 -fno-rtti -I ../include -L ../bin -lHalide -lpthread -ldl -o lesson_16_generate
+// export LD_LIBRARY_PATH=../bin   # For linux
+// export DYLD_LIBRARY_PATH=../bin # For OS X
+// ./lesson_16_generate -o . -f brighten_planar      target=host layout=planar
+// ./lesson_16_generate -o . -f brighten_interleaved target=host layout=interleaved
+// ./lesson_16_generate -o . -f brighten_either      target=host layout=either
+// ./lesson_16_generate -o . -f brighten_specialized target=host layout=specialized
 // g++ lesson_16_rgb_run.cpp brighten_*.o -ldl -lpthread -o lesson_16_run
 // ./lesson_16_run
 
@@ -33,36 +33,31 @@ public:
     // We declare a three-dimensional input image. The first two
     // dimensions will be x, and y, and the third dimension will be
     // the color channel.
-    Input<Buffer<uint8_t, 3>> input{"input"};
+    ImageParam input{UInt(8), 3, "input"};
 
     // We will compile this generator in several ways to accept
     // several different memory layouts for the input and output. This
     // is a good use of a GeneratorParam (see lesson 15).
-    enum class Layout { Planar,
-                        Interleaved,
-                        Either,
-                        Specialized };
+    enum class Layout { Planar, Interleaved, Either, Specialized };
     GeneratorParam<Layout> layout{"layout",
-                                  // default value
-                                  Layout::Planar,
-                                  // map from names to values
-                                  {{"planar", Layout::Planar},
-                                   {"interleaved", Layout::Interleaved},
-                                   {"either", Layout::Either},
-                                   {"specialized", Layout::Specialized}}};
+            // default value
+            Layout::Planar,
+            // map from names to values
+                {{ "planar",        Layout::Planar },
+                 { "interleaved",   Layout::Interleaved },
+                 { "either",        Layout::Either },
+                 { "specialized",   Layout::Specialized }}};
 
-    // We also declare a scalar input to control the amount of
+    // We also declare a scalar parameter to control the amount of
     // brightening.
-    Input<uint8_t> offset{"offset"};
-
-    // Declare our outputs
-    Output<Buffer<uint8_t, 3>> brighter{"brighter"};
+    Param<uint8_t> offset{"offset"};
 
     // Declare our Vars
     Var x, y, c;
 
-    void generate() {
+    Func build() {
         // Define the Func.
+        Func brighter("brighter");
         brighter(x, y, c) = input(x, y, c) + offset;
 
         // Schedule it.
@@ -127,11 +122,13 @@ public:
             // in c is one. We can tell Halide to assume (and assert)
             // that this is the case for the input and output like so:
 
-            input.dim(0).set_stride(3);  // stride in dimension 0 (x) is three
-            input.dim(2).set_stride(1);  // stride in dimension 2 (c) is one
+            input
+                .dim(0).set_stride(3) // stride in dimension 0 (x) is three
+                .dim(2).set_stride(1); // stride in dimension 2 (c) is one
 
-            brighter.dim(0).set_stride(3);
-            brighter.dim(2).set_stride(1);
+            brighter.output_buffer()
+                .dim(0).set_stride(3)
+                .dim(2).set_stride(1);
 
             // For interleaved layout, you may want to use a different
             // schedule. We'll tell Halide to additionally assume and
@@ -139,8 +136,8 @@ public:
             // exploit this fact to make the loop over 'c' innermost
             // and unrolled.
 
-            input.dim(2).set_bounds(0, 3);  // Dimension 2 (c) starts at 0 and has extent 3.
-            brighter.dim(2).set_bounds(0, 3);
+            input.dim(2).set_bounds(0, 3); // Dimension 2 (c) starts at 0 and has extent 3.
+            brighter.output_buffer().dim(2).set_bounds(0, 3);
 
             // Move the loop over color channels innermost and unroll
             // it.
@@ -156,11 +153,11 @@ public:
             // pipeline that will work with any memory layout. It will
             // probably be slow, because all vector loads become
             // gathers, and all vector stores become scatters.
-            input.dim(0).set_stride(Expr());  // Use a default-constructed
-                                              // undefined Expr to mean
-                                              // there is no constraint.
+            input.dim(0).set_stride(Expr()); // Use a default-constructed
+                                             // undefined Expr to mean
+                                             // there is no constraint.
 
-            brighter.dim(0).set_stride(Expr());
+            brighter.output_buffer().dim(0).set_stride(Expr());
 
         } else if (layout == Layout::Specialized) {
             // We can accept any memory layout with good performance
@@ -169,11 +166,11 @@ public:
             // strides it find. First we relax the default constraint
             // that dim(0).stride() == 1:
 
-            input.dim(0).set_stride(Expr());  // Use an undefined Expr to
-                                              // mean there is no
-                                              // constraint.
+            input.dim(0).set_stride(Expr()); // Use an undefined Expr to
+                                             // mean there is no
+                                             // constraint.
 
-            brighter.dim(0).set_stride(Expr());
+            brighter.output_buffer().dim(0).set_stride(Expr());
 
             // The we construct boolean Exprs that detect at runtime
             // whether we're planar or interleaved. The conditions
@@ -187,11 +184,11 @@ public:
                  input.dim(2).extent() == 3);
 
             Expr output_is_planar =
-                (brighter.dim(0).stride() == 1);
+                (brighter.output_buffer().dim(0).stride() == 1);
             Expr output_is_interleaved =
-                (brighter.dim(0).stride() == 3 &&
-                 brighter.dim(2).stride() == 1 &&
-                 brighter.dim(2).extent() == 3);
+                (brighter.output_buffer().dim(0).stride() == 3 &&
+                 brighter.output_buffer().dim(2).stride() == 1 &&
+                 brighter.output_buffer().dim(2).extent() == 3);
 
             // We can then use Func::specialize to write a schedule
             // that switches at runtime to specialized code based on a
@@ -207,8 +204,7 @@ public:
             // of the code for interleaved layouts, and to reorder and
             // unroll that specialized code.
             brighter.specialize(input_is_interleaved && output_is_interleaved)
-                .reorder(c, x, y)
-                .unroll(c);
+                .reorder(c, x, y).unroll(c);
 
             // We could also add specializations for if the input is
             // interleaved and the output is planar, and vice versa,
@@ -223,12 +219,14 @@ public:
             // memory layouts are known, you probably want to use
             // set_stride and set_extent instead.
         }
+
+        return brighter;
     }
 };
 
 // As in lesson 15, we register our generator and then compile this
 // file along with tools/GenGen.cpp.
-HALIDE_REGISTER_GENERATOR(Brighten, brighten)
+RegisterGenerator<Brighten> my_first_generator{"brighten"};
 
 // After compiling this file, see how to use it in
 // lesson_16_rgb_run.cpp

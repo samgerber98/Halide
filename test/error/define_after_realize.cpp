@@ -9,11 +9,11 @@ int main(int argc, char **argv) {
 
     f(x) = x;
 
-    Buffer<int> im = f.realize({10});
+    Buffer<int> im = f.realize(10);
 
     // Now try to add an update definition to f
     f(x) += 1;
 
-    printf("Success!\n");
+    printf("There should have been an error\n");
     return 0;
 }

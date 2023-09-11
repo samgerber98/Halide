@@ -1,10 +1,8 @@
-#include "Parameter.h"
-
-#include "Argument.h"
-#include "Float16.h"
 #include "IR.h"
-#include "IRMutator.h"
 #include "IROperator.h"
+#include "ObjectInstanceRegistry.h"
+#include "Parameter.h"
+#include "Simplify.h"
 
 namespace Halide {
 namespace Internal {
@@ -14,35 +12,32 @@ struct ParameterContents {
     const Type type;
     const int dimensions;
     const std::string name;
+    const std::string handle_type;
     Buffer<> buffer;
-    uint64_t data = 0;
+    uint64_t data;
     int host_alignment;
-    std::vector<BufferConstraint> buffer_constraints;
-    Expr scalar_default, scalar_min, scalar_max, scalar_estimate;
+    Expr min_constraint[4];
+    Expr extent_constraint[4];
+    Expr stride_constraint[4];
+    Expr min_value, max_value;
     const bool is_buffer;
-    MemoryType memory_type = MemoryType::Auto;
-
-    ParameterContents(Type t, bool b, int d, const std::string &n)
-        : type(t), dimensions(d), name(n), buffer(Buffer<>()),
-          host_alignment(t.bytes()), buffer_constraints(std::max(0, dimensions)), is_buffer(b) {
+    const bool is_explicit_name;
+    const bool is_registered;
+    ParameterContents(Type t, bool b, int d, const std::string &n, bool e, bool r)
+        : type(t), dimensions(d), name(n), buffer(Buffer<>()), data(0),
+          host_alignment(t.bytes()), is_buffer(b), is_explicit_name(e), is_registered(r) {
         // stride_constraint[0] defaults to 1. This is important for
         // dense vectorization. You can unset it by setting it to a
         // null expression. (param.set_stride(0, Expr());)
-        if (dimensions > 0) {
-            buffer_constraints[0].stride = 1;
-        }
+        stride_constraint[0] = 1;
     }
 };
 
 template<>
-RefCount &ref_count<Halide::Internal::ParameterContents>(const ParameterContents *p) noexcept {
-    return p->ref_count;
-}
+EXPORT RefCount &ref_count<Halide::Internal::ParameterContents>(const ParameterContents *p) {return p->ref_count;}
 
 template<>
-void destroy<Halide::Internal::ParameterContents>(const ParameterContents *p) {
-    delete p;
-}
+EXPORT void destroy<Halide::Internal::ParameterContents>(const ParameterContents *p) {delete p;}
 
 void Parameter::check_defined() const {
     user_assert(defined()) << "Parameter is undefined\n";
@@ -63,42 +58,55 @@ void Parameter::check_dim_ok(int dim) const {
         << "Dimension " << dim << " is not in the range [0, " << dimensions() - 1 << "]\n";
 }
 
-void Parameter::check_type(const Type &t) const {
-    // Allow set_scalar<uint64_t>() for all Handle types
-    user_assert(type() == t || (type().is_handle() && t == UInt(64)))
-        << "Param<" << type()
-        << "> cannot be accessed as scalar of type " << t << "\n";
+Parameter::Parameter() : contents(nullptr) {
+    // Undefined Parameters are never registered.
 }
 
-Parameter::Parameter(const Type &t, bool is_buffer, int d)
-    : contents(new ParameterContents(t, is_buffer, d, unique_name('p'))) {
+Parameter::Parameter(Type t, bool is_buffer, int d) :
+    contents(new ParameterContents(t, is_buffer, d, unique_name('p'), false, true)) {
     internal_assert(is_buffer || d == 0) << "Scalar parameters should be zero-dimensional";
+    // Note that is_registered is always true here; this is just using a parallel code structure for clarity.
+    if (contents.defined() && contents->is_registered) {
+        ObjectInstanceRegistry::register_instance(this, 0, ObjectInstanceRegistry::FilterParam, this, nullptr);
+    }
 }
 
-Parameter::Parameter(const Type &t, bool is_buffer, int d, const std::string &name)
-    : contents(new ParameterContents(t, is_buffer, d, name)) {
+Parameter::Parameter(Type t, bool is_buffer, int d, const std::string &name, bool is_explicit_name, bool register_instance) :
+    contents(new ParameterContents(t, is_buffer, d, name, is_explicit_name, register_instance)) {
     internal_assert(is_buffer || d == 0) << "Scalar parameters should be zero-dimensional";
+    if (contents.defined() && contents->is_registered) {
+        ObjectInstanceRegistry::register_instance(this, 0, ObjectInstanceRegistry::FilterParam, this, nullptr);
+    }
 }
 
-Parameter::Parameter(const Type &t, bool is_buffer, int dimensions, const std::string &name,
-                     const Buffer<void> &buffer, int host_alignment, const std::vector<BufferConstraint> &buffer_constraints,
-                     MemoryType memory_type)
-    : contents(new ParameterContents(t, is_buffer, dimensions, name)) {
-    contents->buffer = buffer;
-    contents->host_alignment = host_alignment;
-    contents->buffer_constraints = buffer_constraints;
-    contents->memory_type = memory_type;
+Parameter::Parameter(const Parameter& that) : contents(that.contents) {
+    if (contents.defined() && contents->is_registered) {
+        ObjectInstanceRegistry::register_instance(this, 0, ObjectInstanceRegistry::FilterParam, this, nullptr);
+    }
 }
 
-Parameter::Parameter(const Type &t, bool is_buffer, int dimensions, const std::string &name,
-                     uint64_t data, const Expr &scalar_default, const Expr &scalar_min,
-                     const Expr &scalar_max, const Expr &scalar_estimate)
-    : contents(new ParameterContents(t, is_buffer, dimensions, name)) {
-    contents->data = data;
-    contents->scalar_default = scalar_default;
-    contents->scalar_min = scalar_min;
-    contents->scalar_max = scalar_max;
-    contents->scalar_estimate = scalar_estimate;
+Parameter& Parameter::operator=(const Parameter& that) {
+    bool was_registered = contents.defined() && contents->is_registered;
+    contents = that.contents;
+    bool should_be_registered = contents.defined() && contents->is_registered;
+    if (should_be_registered && !was_registered) {
+        // This can happen if you do:
+        // Parameter p; // undefined
+        // p = make_interesting_parameter();
+        ObjectInstanceRegistry::register_instance(this, 0, ObjectInstanceRegistry::FilterParam, this, nullptr);
+    } else if (!should_be_registered && was_registered) {
+        // This can happen if you do:
+        // Parameter p = make_interesting_parameter();
+        // p = Parameter();
+        ObjectInstanceRegistry::unregister_instance(this);
+    }
+    return *this;
+}
+
+Parameter::~Parameter() {
+    if (contents.defined() && contents->is_registered) {
+        ObjectInstanceRegistry::unregister_instance(this);
+    }
 }
 
 Type Parameter::type() const {
@@ -116,75 +124,55 @@ const std::string &Parameter::name() const {
     return contents->name;
 }
 
+bool Parameter::is_explicit_name() const {
+    check_defined();
+    return contents->is_explicit_name;
+}
+
 bool Parameter::is_buffer() const {
     check_defined();
     return contents->is_buffer;
 }
 
-Expr Parameter::scalar_expr() const {
+Expr Parameter::get_scalar_expr() const {
     check_is_scalar();
     const Type t = type();
     if (t.is_float()) {
         switch (t.bits()) {
-        case 16:
-            if (t.is_bfloat()) {
-                return Expr(scalar<bfloat16_t>());
-            } else {
-                return Expr(scalar<float16_t>());
-            }
-        case 32:
-            return Expr(scalar<float>());
-        case 64:
-            return Expr(scalar<double>());
+        case 32: return Expr(get_scalar<float>());
+        case 64: return Expr(get_scalar<double>());
         }
     } else if (t.is_int()) {
         switch (t.bits()) {
-        case 8:
-            return Expr(scalar<int8_t>());
-        case 16:
-            return Expr(scalar<int16_t>());
-        case 32:
-            return Expr(scalar<int32_t>());
-        case 64:
-            return Expr(scalar<int64_t>());
+        case 8: return Expr(get_scalar<int8_t>());
+        case 16: return Expr(get_scalar<int16_t>());
+        case 32: return Expr(get_scalar<int32_t>());
+        case 64: return Expr(get_scalar<int64_t>());
         }
     } else if (t.is_uint()) {
         switch (t.bits()) {
-        case 1:
-            return make_bool(scalar<bool>());
-        case 8:
-            return Expr(scalar<uint8_t>());
-        case 16:
-            return Expr(scalar<uint16_t>());
-        case 32:
-            return Expr(scalar<uint32_t>());
-        case 64:
-            return Expr(scalar<uint64_t>());
+        case 1: return make_bool(get_scalar<bool>());
+        case 8: return Expr(get_scalar<uint8_t>());
+        case 16: return Expr(get_scalar<uint16_t>());
+        case 32: return Expr(get_scalar<uint32_t>());
+        case 64: return Expr(get_scalar<uint64_t>());
         }
     } else if (t.is_handle()) {
         // handles are always uint64 internally.
         switch (t.bits()) {
-        case 64:
-            return Expr(scalar<uint64_t>());
+        case 64: return Expr(get_scalar<uint64_t>());
         }
     }
-    internal_error << "Unsupported type " << t << " in scalar_expr\n";
+    internal_error << "Unsupported type " << t << " in get_scalar_expr\n";
     return Expr();
 }
 
-Buffer<> Parameter::buffer() const {
+Buffer<> Parameter::get_buffer() const {
     check_is_buffer();
     return contents->buffer;
 }
 
-const halide_buffer_t *Parameter::raw_buffer() const {
-    if (!is_buffer()) {
-        return nullptr;
-    }
-    return contents->buffer.raw_buffer();
-}
-
-void Parameter::set_buffer(const Buffer<> &b) {
+void Parameter::set_buffer(Buffer<> b) {
     check_is_buffer();
     if (b.defined()) {
         user_assert(contents->type == b.type())
@@ -196,14 +184,9 @@ void Parameter::set_buffer(const Buffer<> &b) {
     contents->buffer = b;
 }
 
-void *Parameter::scalar_address() const {
+void *Parameter::get_scalar_address() const {
     check_is_scalar();
     return &contents->data;
-}
-
-uint64_t Parameter::scalar_raw_value() const {
-    check_is_scalar();
-    return contents->data;
 }
 
 /** Tests if this handle is the same as another handle */
@@ -216,86 +199,23 @@ bool Parameter::defined() const {
     return contents.defined();
 }
 
-// Helper function to remove any references in a parameter constraint to the
-// parameter itself, to avoid creating a reference count cycle and causing a
-// leak. Note that it's still possible to create a cycle by having two different
-// Parameters each have constraints that reference the other.
-Expr remove_self_references(const Parameter &p, const Expr &e) {
-    class RemoveSelfReferences : public IRMutator {
-        using IRMutator::visit;
-
-        Expr visit(const Variable *var) override {
-            if (var->param.same_as(p)) {
-                internal_assert(starts_with(var->name, p.name() + "."));
-                return Variable::make(var->type, var->name);
-            } else {
-                internal_assert(!starts_with(var->name, p.name() + "."));
-            }
-            return var;
-        }
-
-    public:
-        const Parameter &p;
-        RemoveSelfReferences(const Parameter &p)
-            : p(p) {
-        }
-    } mutator{p};
-    return mutator.mutate(e);
-}
-
-Expr restore_self_references(const Parameter &p, const Expr &e) {
-    class RestoreSelfReferences : public IRMutator {
-        using IRMutator::visit;
-
-        Expr visit(const Variable *var) override {
-            if (!var->image.defined() &&
-                !var->param.defined() &&
-                !var->reduction_domain.defined() &&
-                starts_with(var->name, p.name() + ".")) {
-                return Variable::make(var->type, var->name, p);
-            }
-            return var;
-        }
-
-    public:
-        const Parameter &p;
-        RestoreSelfReferences(const Parameter &p)
-            : p(p) {
-        }
-    } mutator{p};
-    return mutator.mutate(e);
-}
-
-void Parameter::set_min_constraint(int dim, const Expr &e) {
+void Parameter::set_min_constraint(int dim, Expr e) {
     check_is_buffer();
     check_dim_ok(dim);
-    contents->buffer_constraints[dim].min = remove_self_references(*this, e);
+    contents->min_constraint[dim] = e;
 }
 
-void Parameter::set_extent_constraint(int dim, const Expr &e) {
+void Parameter::set_extent_constraint(int dim, Expr e) {
     check_is_buffer();
     check_dim_ok(dim);
-    contents->buffer_constraints[dim].extent = remove_self_references(*this, e);
+    contents->extent_constraint[dim] = e;
 }
 
-void Parameter::set_stride_constraint(int dim, const Expr &e) {
+void Parameter::set_stride_constraint(int dim, Expr e) {
     check_is_buffer();
     check_dim_ok(dim);
-    contents->buffer_constraints[dim].stride = remove_self_references(*this, e);
+    contents->stride_constraint[dim] = e;
 }
-
-void Parameter::set_min_constraint_estimate(int dim, const Expr &min) {
-    check_is_buffer();
-    check_dim_ok(dim);
-    contents->buffer_constraints[dim].min_estimate = remove_self_references(*this, min);
-}
-
-void Parameter::set_extent_constraint_estimate(int dim, const Expr &extent) {
-    check_is_buffer();
-    check_dim_ok(dim);
-    contents->buffer_constraints[dim].extent_estimate = remove_self_references(*this, extent);
-}
-
 void Parameter::set_host_alignment(int bytes) {
     check_is_buffer();
     contents->host_alignment = bytes;
@@ -304,65 +224,25 @@ void Parameter::set_host_alignment(int bytes) {
 Expr Parameter::min_constraint(int dim) const {
     check_is_buffer();
     check_dim_ok(dim);
-    return restore_self_references(*this, contents->buffer_constraints[dim].min);
+    return contents->min_constraint[dim];
 }
 
 Expr Parameter::extent_constraint(int dim) const {
     check_is_buffer();
     check_dim_ok(dim);
-    return restore_self_references(*this, contents->buffer_constraints[dim].extent);
+    return contents->extent_constraint[dim];
 }
 
 Expr Parameter::stride_constraint(int dim) const {
     check_is_buffer();
     check_dim_ok(dim);
-    return restore_self_references(*this, contents->buffer_constraints[dim].stride);
+    return contents->stride_constraint[dim];
 }
-
-Expr Parameter::min_constraint_estimate(int dim) const {
-    check_is_buffer();
-    check_dim_ok(dim);
-    return restore_self_references(*this, contents->buffer_constraints[dim].min_estimate);
-}
-
-Expr Parameter::extent_constraint_estimate(int dim) const {
-    check_is_buffer();
-    check_dim_ok(dim);
-    return restore_self_references(*this, contents->buffer_constraints[dim].extent_estimate);
-}
-
 int Parameter::host_alignment() const {
     check_is_buffer();
     return contents->host_alignment;
 }
-
-const std::vector<BufferConstraint> &Parameter::buffer_constraints() const {
-    check_is_buffer();
-    return contents->buffer_constraints;
-}
-
-void Parameter::set_default_value(const Expr &e) {
-    check_is_scalar();
-    if (e.defined()) {
-        user_assert(e.type() == contents->type)
-            << "Can't set parameter " << name()
-            << " of type " << contents->type
-            << " to have default value " << e
-            << " of type " << e.type() << "\n";
-
-        user_assert(is_const(e))
-            << "Default value for parameter " << name()
-            << " must be constant: " << e << "\n";
-    }
-    contents->scalar_default = e;
-}
-
-Expr Parameter::default_value() const {
-    check_is_scalar();
-    return contents->scalar_default;
-}
-
-void Parameter::set_min_value(const Expr &e) {
+void Parameter::set_min_value(Expr e) {
     check_is_scalar();
     if (e.defined()) {
         user_assert(e.type() == contents->type)
@@ -370,20 +250,16 @@ void Parameter::set_min_value(const Expr &e) {
             << " of type " << contents->type
             << " to have min value " << e
             << " of type " << e.type() << "\n";
-
-        user_assert(is_const(e))
-            << "Min value for parameter " << name()
-            << " must be constant: " << e << "\n";
     }
-    contents->scalar_min = e;
+    contents->min_value = e;
 }
 
-Expr Parameter::min_value() const {
+Expr Parameter::get_min_value() const {
     check_is_scalar();
-    return contents->scalar_min;
+    return contents->min_value;
 }
 
-void Parameter::set_max_value(const Expr &e) {
+void Parameter::set_max_value(Expr e) {
     check_is_scalar();
     if (e.defined()) {
         user_assert(e.type() == contents->type)
@@ -391,44 +267,73 @@ void Parameter::set_max_value(const Expr &e) {
             << " of type " << contents->type
             << " to have max value " << e
             << " of type " << e.type() << "\n";
-
-        user_assert(is_const(e))
-            << "Max value for parameter " << name()
-            << " must be constant: " << e << "\n";
     }
-    contents->scalar_max = e;
+    contents->max_value = e;
 }
 
-Expr Parameter::max_value() const {
+Expr Parameter::get_max_value() const {
     check_is_scalar();
-    return contents->scalar_max;
+    return contents->max_value;
 }
 
-void Parameter::set_estimate(Expr e) {
-    check_is_scalar();
-    contents->scalar_estimate = std::move(e);
+Dimension::Dimension(const Internal::Parameter &p, int d) : param(p), d(d) {
+    user_assert(param.defined())
+        << "Can't access the dimensions of an undefined Parameter\n";
+    user_assert(param.is_buffer())
+        << "Can't access the dimensions of a scalar Parameter\n";
+    user_assert(d >= 0 && d < param.dimensions())
+        << "Can't access dimension " << d
+        << " of a " << param.dimensions() << "-dimensional Parameter\n";
 }
 
-Expr Parameter::estimate() const {
-    check_is_scalar();
-    return contents->scalar_estimate;
+Expr Dimension::min() const {
+    std::ostringstream s;
+    s << param.name() << ".min." << d;
+    return Variable::make(Int(32), s.str(), param);
 }
 
-ArgumentEstimates Parameter::get_argument_estimates() const {
-    ArgumentEstimates argument_estimates;
-    if (!is_buffer()) {
-        argument_estimates.scalar_def = default_value();
-        argument_estimates.scalar_min = min_value();
-        argument_estimates.scalar_max = max_value();
-        argument_estimates.scalar_estimate = estimate();
-    } else {
-        argument_estimates.buffer_estimates.resize(dimensions());
-        for (int i = 0; i < dimensions(); i++) {
-            argument_estimates.buffer_estimates[i].min = min_constraint_estimate(i);
-            argument_estimates.buffer_estimates[i].extent = extent_constraint_estimate(i);
-        }
-    }
-    return argument_estimates;
+Expr Dimension::extent() const {
+    std::ostringstream s;
+    s << param.name() << ".extent." << d;
+    return Variable::make(Int(32), s.str(), param);
+}
+
+Expr Dimension::max() const {
+    return min() + extent() - 1;
+}
+
+Expr Dimension::stride() const {
+    std::ostringstream s;
+    s << param.name() << ".stride." << d;
+    return Variable::make(Int(32), s.str(), param);
+}
+
+Dimension Dimension::set_extent(Expr extent) {
+    param.set_extent_constraint(d, extent);
+    return *this;
+}
+
+Dimension Dimension::set_min(Expr min) {
+    param.set_min_constraint(d, min);
+    return *this;
+}
+
+Dimension Dimension::set_stride(Expr stride) {
+    param.set_stride_constraint(d, stride);
+    return *this;
+}
+
+
+Dimension Dimension::set_bounds(Expr min, Expr extent) {
+    return set_min(min).set_extent(extent);
+}
+
+Dimension Dimension::dim(int i) {
+    return Dimension(param, i);
+}
+
+const Dimension Dimension::dim(int i) const {
+    return Dimension(param, i);
 }
 
 void check_call_arg_types(const std::string &name, std::vector<Expr> *args, int dims) {
@@ -441,7 +346,7 @@ void check_call_arg_types(const std::string &name, std::vector<Expr> *args, int 
             << "Argument " << i << " to call to \"" << name << "\" is an undefined Expr\n";
         Type t = (*args)[i].type();
         if (t.is_float() || (t.is_uint() && t.bits() >= 32) || (t.is_int() && t.bits() > 32)) {
-            user_error << "Implicit cast from " << t << " to int in argument " << (i + 1)
+            user_error << "Implicit cast from " << t << " to int in argument " << (i+1)
                        << " in call to \"" << name << "\" is not allowed. Use an explicit cast.\n";
         }
         // We're allowed to implicitly cast from other varieties of int
@@ -451,15 +356,7 @@ void check_call_arg_types(const std::string &name, std::vector<Expr> *args, int 
     }
 }
 
-void Parameter::store_in(MemoryType memory_type) {
-    check_is_buffer();
-    contents->memory_type = memory_type;
-}
 
-MemoryType Parameter::memory_type() const {
-    // check_is_buffer();
-    return contents->memory_type;
-}
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

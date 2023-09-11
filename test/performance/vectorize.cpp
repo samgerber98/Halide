@@ -1,18 +1,15 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
 #include <cstdio>
+#include "benchmark.h"
 
 using namespace Halide;
-using namespace Halide::Tools;
 
 template<typename A>
 const char *string_of_type();
 
-#define DECL_SOT(name)                   \
-    template<>                           \
-    const char *string_of_type<name>() { \
-        return #name;                    \
-    }
+#define DECL_SOT(name)                                          \
+    template<>                                                  \
+    const char *string_of_type<name>() {return #name;}
 
 DECL_SOT(uint8_t);
 DECL_SOT(int8_t);
@@ -24,17 +21,15 @@ DECL_SOT(float);
 DECL_SOT(double);
 
 template<typename A>
-bool test() {
-    const Target target = get_jit_target_from_environment();
-    const int vec_width = target.natural_vector_size<A>();
+bool test(int vec_width) {
 
-    int W = vec_width * 1;
+    int W = vec_width*1;
     int H = 10000;
 
-    Buffer<A> input(W, H + 20);
-    for (int y = 0; y < H + 20; y++) {
+    Buffer<A> input(W, H+20);
+    for (int y = 0; y < H+20; y++) {
         for (int x = 0; x < W; x++) {
-            input(x, y) = Internal::safe_numeric_cast<A>((rand() & 0xffff) * 0.125 + 1.0);
+            input(x, y) = (A)((rand() & 0xffff)*0.125 + 1.0);
         }
     }
 
@@ -43,11 +38,11 @@ bool test() {
 
     Expr e = input(x, y);
     for (int i = 1; i < 5; i++) {
-        e = e + input(x, y + i);
+        e = e + input(x, y+i);
     }
 
     for (int i = 5; i >= 0; i--) {
-        e = e + input(x, y + i);
+        e = e + input(x, y+i);
     }
 
     f(x, y) = e;
@@ -59,13 +54,13 @@ bool test() {
     // is small enough to fit in cache.
     g.reorder(y, x);
 
-    Buffer<A> outputg = g.realize({W, H});
-    Buffer<A> outputf = f.realize({W, H});
+    Buffer<A> outputg = g.realize(W, H);
+    Buffer<A> outputf = f.realize(W, H);
 
-    double t_g = benchmark([&]() {
+    double t_g = benchmark(10, 10, [&]() {
         g.realize(outputg);
     });
-    double t_f = benchmark([&]() {
+    double t_f = benchmark(10, 10, [&]() {
         f.realize(outputf);
     });
 
@@ -76,7 +71,8 @@ bool test() {
                        string_of_type<A>(), vec_width,
                        x, y,
                        (int)outputf(x, y),
-                       (int)outputg(x, y));
+                       (int)outputg(x, y)
+                    );
                 return false;
             }
         }
@@ -89,32 +85,26 @@ bool test() {
         return false;
     }
 
+
     return true;
 }
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
 
     bool ok = true;
 
     // Only native vector widths for now
-    ok = ok && test<float>();
-    ok = ok && test<double>();
-    ok = ok && test<uint8_t>();
-    ok = ok && test<int8_t>();
-    ok = ok && test<uint16_t>();
-    ok = ok && test<int16_t>();
-    ok = ok && test<uint32_t>();
-    ok = ok && test<int32_t>();
+    ok = ok && test<float>(4);
+    ok = ok && test<float>(8);
+    ok = ok && test<double>(2);
+    ok = ok && test<uint8_t>(16);
+    ok = ok && test<int8_t>(16);
+    ok = ok && test<uint16_t>(8);
+    ok = ok && test<int16_t>(8);
+    ok = ok && test<uint32_t>(4);
+    ok = ok && test<int32_t>(4);
 
-    if (!ok) {
-        return 1;
-    }
-
+    if (!ok) return -1;
     printf("Success!\n");
     return 0;
 }

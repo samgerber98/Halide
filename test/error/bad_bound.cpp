@@ -10,6 +10,5 @@ int main(int argc, char **argv) {
     f(x) = 0;
     f.bound(y, 0, 10);
 
-    printf("Success!\n");
     return 0;
 }

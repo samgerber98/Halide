@@ -6,50 +6,34 @@
  * Defines Func - the front-end handle on a halide function, and related classes.
  */
 
-#include "Argument.h"
-#include "Expr.h"
-#include "JITModule.h"
-#include "Module.h"
+#include "IR.h"
+#include "Var.h"
+#include "Function.h"
 #include "Param.h"
-#include "Pipeline.h"
+#include "OutputImageParam.h"
+#include "Argument.h"
 #include "RDom.h"
+#include "JITModule.h"
 #include "Target.h"
 #include "Tuple.h"
-#include "Var.h"
+#include "Module.h"
+#include "Pipeline.h"
 
 #include <map>
-#include <utility>
 
 namespace Halide {
-
-class OutputImageParam;
 
 /** A class that can represent Vars or RVars. Used for reorder calls
  * which can accept a mix of either. */
 struct VarOrRVar {
-    VarOrRVar(const std::string &n, bool r)
-        : var(n), rvar(n), is_rvar(r) {
-    }
-    VarOrRVar(const Var &v)
-        : var(v), is_rvar(false) {
-    }
-    VarOrRVar(const RVar &r)
-        : rvar(r), is_rvar(true) {
-    }
-    VarOrRVar(const RDom &r)
-        : rvar(RVar(r)), is_rvar(true) {
-    }
-    template<int N>
-    VarOrRVar(const ImplicitVar<N> &u)
-        : var(u), is_rvar(false) {
-    }
+    VarOrRVar(const std::string &n, bool r) : var(n), rvar(n), is_rvar(r) {}
+    VarOrRVar(const Var &v) : var(v), is_rvar(false) {}
+    VarOrRVar(const RVar &r) : rvar(r), is_rvar(true) {}
+    VarOrRVar(const RDom &r) : rvar(RVar(r)), is_rvar(true) {}
 
     const std::string &name() const {
-        if (is_rvar) {
-            return rvar.name();
-        } else {
-            return var.name();
-        }
+        if (is_rvar) return rvar.name();
+        else return var.name();
     }
 
     Var var;
@@ -60,63 +44,59 @@ struct VarOrRVar {
 class ImageParam;
 
 namespace Internal {
-class Function;
 struct Split;
 struct StorageDim;
-}  // namespace Internal
+}
 
 /** A single definition of a Func. May be a pure or update definition. */
 class Stage {
-    /** Reference to the Function this stage (or definition) belongs to. */
-    Internal::Function function;
     Internal::Definition definition;
-    /** Indicate which stage the definition belongs to (0 for initial
-     * definition, 1 for first update, etc.). */
-    size_t stage_index;
-    /** Pure Vars of the Function (from the init definition). */
-    std::vector<Var> dim_vars;
+    std::string stage_name;
+    std::vector<Var> dim_vars; // Pure Vars of the Function (from the init definition)
+    std::vector<Internal::StorageDim> storage_dims;
 
-    void set_dim_type(const VarOrRVar &var, Internal::ForType t);
-    void set_dim_device_api(const VarOrRVar &var, DeviceAPI device_api);
+    void set_dim_type(VarOrRVar var, Internal::ForType t);
+    void set_dim_device_api(VarOrRVar var, DeviceAPI device_api);
     void split(const std::string &old, const std::string &outer, const std::string &inner,
-               const Expr &factor, bool exact, TailStrategy tail);
+               Expr factor, bool exact, TailStrategy tail);
     void remove(const std::string &var);
-    Stage &purify(const VarOrRVar &old_name, const VarOrRVar &new_name);
-
-    const std::vector<Internal::StorageDim> &storage_dims() const {
-        return function.schedule().storage_dims();
-    }
-
-    Stage &compute_with(LoopLevel loop_level, const std::map<std::string, LoopAlignStrategy> &align);
+    Stage &purify(VarOrRVar old_name, VarOrRVar new_name);
 
 public:
-    Stage(Internal::Function f, Internal::Definition d, size_t stage_index)
-        : function(std::move(f)), definition(std::move(d)), stage_index(stage_index) {
-        internal_assert(definition.defined());
+    Stage(Internal::Definition d, const std::string &n, const std::vector<Var> &args,
+          const std::vector<Internal::StorageDim> &sdims)
+            : definition(d), stage_name(n), dim_vars(args), storage_dims(sdims) {
+        internal_assert(definition.args().size() == dim_vars.size());
+        definition.schedule().touched() = true;
+    }
 
-        dim_vars.reserve(function.args().size());
-        for (const auto &arg : function.args()) {
-            dim_vars.emplace_back(arg);
+    Stage(Internal::Definition d, const std::string &n, const std::vector<std::string> &args,
+          const std::vector<Internal::StorageDim> &sdims)
+            : definition(d), stage_name(n), storage_dims(sdims) {
+        definition.schedule().touched() = true;
+
+        std::vector<Var> dim_vars(args.size());
+        for (size_t i = 0; i < args.size(); i++) {
+            dim_vars[i] = Var(args[i]);
         }
         internal_assert(definition.args().size() == dim_vars.size());
     }
 
-    /** Return the current StageSchedule associated with this Stage. For
-     * introspection only: to modify schedule, use the Func interface. */
-    const Internal::StageSchedule &get_schedule() const {
-        return definition.schedule();
-    }
+    /** Return the current Schedule associated with this Stage.  For
+     * introspection only: to modify Schedule, use the Func
+     * interface. */
+    const Internal::Schedule &get_schedule() const { return definition.schedule(); }
 
     /** Return a string describing the current var list taking into
      * account all the splits, reorders, and tiles. */
-    std::string dump_argument_list() const;
+    EXPORT std::string dump_argument_list() const;
 
     /** Return the name of this stage, e.g. "f.update(2)" */
-    std::string name() const;
+    EXPORT const std::string &name() const;
 
     /** Calling rfactor() on an associative update definition a Func will split
      * the update into an intermediate which computes the partial results and
-     * replaces the current update definition with a new definition which merges
+     * replace the current update definition with a new definition which merges
      * the partial results. If called on a init/pure definition, this will
      * throw an error. rfactor() will automatically infer the associative reduction
      * operator and identity of the operator. If it can't prove the operation
@@ -131,8 +111,8 @@ public:
      * 'preserved') are made pure in the intermediate Func. The intermediate Func's
      * update definition inherits all scheduling directives (e.g. split,fuse, etc.)
      * applied to the original Func's update definition. The loop order of the
-     * intermediate Func's update definition is the same as the original, although
-     * the RVars in 'preserved' are replaced by the new pure Vars. The loop order of the
+     * intermediate Func's update definition is the same as the original, albeit
+     * the lifted RVars are replaced by the new pure Vars. The loop order of the
      * intermediate Func's init definition from innermost to outermost is the args'
      * order of the original Func's init definition followed by the new pure Vars.
      *
@@ -179,293 +159,143 @@ public:
      parallel for x:
        for y:
          for rxo = 0 to 11:
-           f(x, y) = max(f(x, y), f_intm(x, y, rxo))
+           f(x, y) = max(f(x, y), f_intm(x, y, u))
      \endcode
      *
      */
     // @{
-    Func rfactor(std::vector<std::pair<RVar, Var>> preserved);
-    Func rfactor(const RVar &r, const Var &v);
-    // @}
-
-    /** Schedule the iteration over this stage to be fused with another
-     * stage 's' from outermost loop to a given LoopLevel. 'this' stage will
-     * be computed AFTER 's' in the innermost fused dimension. There should not
-     * be any dependencies between those two fused stages. If either of the
-     * stages being fused is a stage of an extern Func, this will throw an error.
-     *
-     * Note that the two stages that are fused together should have the same
-     * exact schedule from the outermost to the innermost fused dimension, and
-     * the stage we are calling compute_with on should not have specializations,
-     * e.g. f2.compute_with(f1, x) is allowed only if f2 has no specializations.
-     *
-     * Also, if a producer is desired to be computed at the fused loop level,
-     * the function passed to the compute_at() needs to be the "parent". Consider
-     * the following code:
-     \code
-     input(x, y) = x + y;
-     f(x, y) = input(x, y);
-     f(x, y) += 5;
-     g(x, y) = x - y;
-     g(x, y) += 10;
-     f.compute_with(g, y);
-     f.update().compute_with(g.update(), y);
-     \endcode
-     *
-     * To compute 'input' at the fused loop level at dimension y, we specify
-     * input.compute_at(g, y) instead of input.compute_at(f, y) since 'g' is
-     * the "parent" for this fused loop (i.e. 'g' is computed first before 'f'
-     * is computed). On the other hand, to compute 'input' at the innermost
-     * dimension of 'f', we specify input.compute_at(f, x) instead of
-     * input.compute_at(g, x) since the x dimension of 'f' is not fused
-     * (only the y dimension is).
-     *
-     * Given the constraints, this has a variety of uses. Consider the
-     * following code:
-     \code
-     f(x, y) = x + y;
-     g(x, y) = x - y;
-     h(x, y) = f(x, y) + g(x, y);
-     f.compute_root();
-     g.compute_root();
-     f.split(x, xo, xi, 8);
-     g.split(x, xo, xi, 8);
-     g.compute_with(f, xo);
-     \endcode
-     *
-     * This is equivalent to:
-     \code
-     for y:
-       for xo:
-         for xi:
-           f(8*xo + xi) = (8*xo + xi) + y
-         for xi:
-           g(8*xo + xi) = (8*xo + xi) - y
-     for y:
-       for x:
-         h(x, y) = f(x, y) + g(x, y)
-     \endcode
-     *
-     * The size of the dimensions of the stages computed_with do not have
-     * to match. Consider the following code where 'g' is half the size of 'f':
-     \code
-     Image<int> f_im(size, size), g_im(size/2, size/2);
-     input(x, y) = x + y;
-     f(x, y) = input(x, y);
-     g(x, y) = input(2*x, 2*y);
-     g.compute_with(f, y);
-     input.compute_at(f, y);
-     Pipeline({f, g}).realize({f_im, g_im});
-     \endcode
-     *
-     * This is equivalent to:
-     \code
-     for y = 0 to size-1:
-       for x = 0 to size-1:
-         input(x, y) = x + y;
-       for x = 0 to size-1:
-         f(x, y) = input(x, y)
-       for x = 0 to size/2-1:
-         if (y < size/2-1):
-           g(x, y) = input(2*x, 2*y)
-     \endcode
-     *
-     * 'align' specifies how the loop iteration of each dimension of the
-     * two stages being fused should be aligned in the fused loop nests
-     * (see LoopAlignStrategy for options). Consider the following loop nests:
-     \code
-     for z = f_min_z to f_max_z:
-       for y = f_min_y to f_max_y:
-         for x = f_min_x to f_max_x:
-           f(x, y, z) = x + y + z
-     for z = g_min_z to g_max_z:
-       for y = g_min_y to g_max_y:
-         for x = g_min_x to g_max_x:
-           g(x, y, z) = x - y - z
-     \endcode
-     *
-     * If no alignment strategy is specified, the following loop nest will be
-     * generated:
-     \code
-     for z = min(f_min_z, g_min_z) to max(f_max_z, g_max_z):
-       for y = min(f_min_y, g_min_y) to max(f_max_y, g_max_y):
-         for x = f_min_x to f_max_x:
-           if (f_min_z <= z <= f_max_z):
-             if (f_min_y <= y <= f_max_y):
-               f(x, y, z) = x + y + z
-         for x = g_min_x to g_max_x:
-           if (g_min_z <= z <= g_max_z):
-             if (g_min_y <= y <= g_max_y):
-               g(x, y, z) = x - y - z
-     \endcode
-     *
-     * Instead, these alignment strategies:
-     \code
-     g.compute_with(f, y, {{z, LoopAlignStrategy::AlignStart}, {y, LoopAlignStrategy::AlignEnd}});
-     \endcode
-     * will produce the following loop nest:
-     \code
-     f_loop_min_z = f_min_z
-     f_loop_max_z = max(f_max_z, (f_min_z - g_min_z) + g_max_z)
-     for z = f_min_z to f_loop_max_z:
-       f_loop_min_y = min(f_min_y, (f_max_y - g_max_y) + g_min_y)
-       f_loop_max_y = f_max_y
-       for y = f_loop_min_y to f_loop_max_y:
-         for x = f_min_x to f_max_x:
-           if (f_loop_min_z <= z <= f_loop_max_z):
-             if (f_loop_min_y <= y <= f_loop_max_y):
-               f(x, y, z) = x + y + z
-         for x = g_min_x to g_max_x:
-           g_shift_z = g_min_z - f_loop_min_z
-           g_shift_y = g_max_y - f_loop_max_y
-           if (g_min_z <= (z + g_shift_z) <= g_max_z):
-             if (g_min_y <= (y + g_shift_y) <= g_max_y):
-               g(x, y + g_shift_y, z + g_shift_z) = x - (y + g_shift_y) - (z + g_shift_z)
-     \endcode
-     *
-     * LoopAlignStrategy::AlignStart on dimension z will shift the loop iteration
-     * of 'g' at dimension z so that its starting value matches that of 'f'.
-     * Likewise, LoopAlignStrategy::AlignEnd on dimension y will shift the loop
-     * iteration of 'g' at dimension y so that its end value matches that of 'f'.
-     */
-    // @{
-    Stage &compute_with(LoopLevel loop_level, const std::vector<std::pair<VarOrRVar, LoopAlignStrategy>> &align);
-    Stage &compute_with(LoopLevel loop_level, LoopAlignStrategy align = LoopAlignStrategy::Auto);
-    Stage &compute_with(const Stage &s, const VarOrRVar &var, const std::vector<std::pair<VarOrRVar, LoopAlignStrategy>> &align);
-    Stage &compute_with(const Stage &s, const VarOrRVar &var, LoopAlignStrategy align = LoopAlignStrategy::Auto);
+    EXPORT Func rfactor(std::vector<std::pair<RVar, Var>> preserved);
+    EXPORT Func rfactor(RVar r, Var v);
     // @}
 
     /** Scheduling calls that control how the domain of this stage is
      * traversed. See the documentation for Func for the meanings. */
     // @{
 
-    Stage &split(const VarOrRVar &old, const VarOrRVar &outer, const VarOrRVar &inner, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
-    Stage &fuse(const VarOrRVar &inner, const VarOrRVar &outer, const VarOrRVar &fused);
-    Stage &serial(const VarOrRVar &var);
-    Stage &parallel(const VarOrRVar &var);
-    Stage &vectorize(const VarOrRVar &var);
-    Stage &unroll(const VarOrRVar &var);
-    Stage &parallel(const VarOrRVar &var, const Expr &task_size, TailStrategy tail = TailStrategy::Auto);
-    Stage &vectorize(const VarOrRVar &var, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
-    Stage &unroll(const VarOrRVar &var, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
-    Stage &tile(const VarOrRVar &x, const VarOrRVar &y,
-                const VarOrRVar &xo, const VarOrRVar &yo,
-                const VarOrRVar &xi, const VarOrRVar &yi, const Expr &xfactor, const Expr &yfactor,
-                TailStrategy tail = TailStrategy::Auto);
-    Stage &tile(const VarOrRVar &x, const VarOrRVar &y,
-                const VarOrRVar &xi, const VarOrRVar &yi,
-                const Expr &xfactor, const Expr &yfactor,
-                TailStrategy tail = TailStrategy::Auto);
-    Stage &tile(const std::vector<VarOrRVar> &previous,
-                const std::vector<VarOrRVar> &outers,
-                const std::vector<VarOrRVar> &inners,
-                const std::vector<Expr> &factors,
-                const std::vector<TailStrategy> &tails);
-    Stage &tile(const std::vector<VarOrRVar> &previous,
-                const std::vector<VarOrRVar> &outers,
-                const std::vector<VarOrRVar> &inners,
-                const std::vector<Expr> &factors,
-                TailStrategy tail = TailStrategy::Auto);
-    Stage &tile(const std::vector<VarOrRVar> &previous,
-                const std::vector<VarOrRVar> &inners,
-                const std::vector<Expr> &factors,
-                TailStrategy tail = TailStrategy::Auto);
-    Stage &reorder(const std::vector<VarOrRVar> &vars);
+    EXPORT Stage &split(VarOrRVar old, VarOrRVar outer, VarOrRVar inner, Expr factor, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &fuse(VarOrRVar inner, VarOrRVar outer, VarOrRVar fused);
+    EXPORT Stage &serial(VarOrRVar var);
+    EXPORT Stage &parallel(VarOrRVar var);
+    EXPORT Stage &vectorize(VarOrRVar var);
+    EXPORT Stage &unroll(VarOrRVar var);
+    EXPORT Stage &parallel(VarOrRVar var, Expr task_size, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &vectorize(VarOrRVar var, int factor, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &unroll(VarOrRVar var, int factor, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &tile(VarOrRVar x, VarOrRVar y,
+                       VarOrRVar xo, VarOrRVar yo,
+                       VarOrRVar xi, VarOrRVar yi, Expr
+                       xfactor, Expr yfactor,
+                       TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &tile(VarOrRVar x, VarOrRVar y,
+                       VarOrRVar xi, VarOrRVar yi,
+                       Expr xfactor, Expr yfactor,
+                       TailStrategy tail = TailStrategy::Auto);
+    EXPORT Stage &reorder(const std::vector<VarOrRVar> &vars);
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE typename std::enable_if<Internal::all_are_convertible<VarOrRVar, Args...>::value, Stage &>::type
-    reorder(const VarOrRVar &x, const VarOrRVar &y, Args &&...args) {
+    template <typename... Args>
+    NO_INLINE typename std::enable_if<Internal::all_are_convertible<VarOrRVar, Args...>::value, Stage &>::type
+    reorder(VarOrRVar x, VarOrRVar y, Args&&... args) {
         std::vector<VarOrRVar> collected_args{x, y, std::forward<Args>(args)...};
         return reorder(collected_args);
     }
 
-    Stage &rename(const VarOrRVar &old_name, const VarOrRVar &new_name);
-    Stage specialize(const Expr &condition);
-    void specialize_fail(const std::string &message);
+    EXPORT Stage &rename(VarOrRVar old_name, VarOrRVar new_name);
+    EXPORT Stage specialize(Expr condition);
 
-    Stage &gpu_threads(const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_threads(const VarOrRVar &thread_x, const VarOrRVar &thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_threads(const VarOrRVar &thread_x, const VarOrRVar &thread_y, const VarOrRVar &thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_threads(VarOrRVar thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_threads(VarOrRVar thread_x, VarOrRVar thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_threads(VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_single_thread(DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_lanes(const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_blocks(VarOrRVar block_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_blocks(VarOrRVar block_x, VarOrRVar block_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_blocks(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_single_thread(DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu(VarOrRVar block_x, VarOrRVar thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu(VarOrRVar block_x, VarOrRVar block_y,
+                      VarOrRVar thread_x, VarOrRVar thread_y,
+                      DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z,
+                      VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z,
+                      DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_blocks(const VarOrRVar &block_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_blocks(const VarOrRVar &block_x, const VarOrRVar &block_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_blocks(const VarOrRVar &block_x, const VarOrRVar &block_y, const VarOrRVar &block_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // TODO(psuriana): For now we need to expand "tx" into Var and RVar versions
+    // due to conflict with the deprecated interfaces since Var can be implicitly
+    // converted into either VarOrRVar or Expr. Merge this later once we remove
+    // the deprecated interfaces.
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar bx, Var tx, Expr x_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar bx, RVar tx, Expr x_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu(const VarOrRVar &block_x, const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu(const VarOrRVar &block_x, const VarOrRVar &block_y,
-               const VarOrRVar &thread_x, const VarOrRVar &thread_y,
-               DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu(const VarOrRVar &block_x, const VarOrRVar &block_y, const VarOrRVar &block_z,
-               const VarOrRVar &thread_x, const VarOrRVar &thread_y, const VarOrRVar &thread_z,
-               DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar tx, Expr x_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y,
+                           VarOrRVar bx, VarOrRVar by,
+                           VarOrRVar tx, VarOrRVar ty,
+                           Expr x_size, Expr y_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &bx, const VarOrRVar &tx, const Expr &x_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y,
+                           VarOrRVar tx, Var ty,
+                           Expr x_size, Expr y_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y,
+                           VarOrRVar tx, RVar ty,
+                           Expr x_size, Expr y_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &tx, const Expr &x_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &y,
-                    const VarOrRVar &bx, const VarOrRVar &by,
-                    const VarOrRVar &tx, const VarOrRVar &ty,
-                    const Expr &x_size, const Expr &y_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                           VarOrRVar bx, VarOrRVar by, VarOrRVar bz,
+                           VarOrRVar tx, VarOrRVar ty, VarOrRVar tz,
+                           Expr x_size, Expr y_size, Expr z_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                           VarOrRVar tx, VarOrRVar ty, VarOrRVar tz,
+                           Expr x_size, Expr y_size, Expr z_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &y,
-                    const VarOrRVar &tx, const VarOrRVar &ty,
-                    const Expr &x_size, const Expr &y_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // Will be deprecated.
+    EXPORT Stage &gpu_tile(VarOrRVar x, Expr x_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // Will be deprecated.
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y,
+                           Expr x_size, Expr y_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // Will be deprecated.
+    EXPORT Stage &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                           Expr x_size, Expr y_size, Expr z_size,
+                           TailStrategy tail = TailStrategy::Auto,
+                           DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &y, const VarOrRVar &z,
-                    const VarOrRVar &bx, const VarOrRVar &by, const VarOrRVar &bz,
-                    const VarOrRVar &tx, const VarOrRVar &ty, const VarOrRVar &tz,
-                    const Expr &x_size, const Expr &y_size, const Expr &z_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Stage &gpu_tile(const VarOrRVar &x, const VarOrRVar &y, const VarOrRVar &z,
-                    const VarOrRVar &tx, const VarOrRVar &ty, const VarOrRVar &tz,
-                    const Expr &x_size, const Expr &y_size, const Expr &z_size,
-                    TailStrategy tail = TailStrategy::Auto,
-                    DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Stage &allow_race_conditions();
 
-    Stage &allow_race_conditions();
-    Stage &atomic(bool override_associativity_test = false);
-
-    Stage &hexagon(const VarOrRVar &x = Var::outermost());
-
-    Stage &prefetch(const Func &f, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
-                    PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
-    Stage &prefetch(const Internal::Parameter &param, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
-                    PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
+    EXPORT Stage &hexagon(VarOrRVar x = Var::outermost());
+    EXPORT Stage &prefetch(const Func &f, VarOrRVar var, Expr offset = 1,
+                           PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
+    EXPORT Stage &prefetch(const Internal::Parameter &param, VarOrRVar var, Expr offset = 1,
+                           PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
     template<typename T>
-    Stage &prefetch(const T &image, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
+    Stage &prefetch(const T &image, VarOrRVar var, Expr offset = 1,
                     PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf) {
-        return prefetch(image.parameter(), at, from, std::move(offset), strategy);
+        return prefetch(image.parameter(), var, offset, strategy);
     }
     // @}
-
-    /** Attempt to get the source file and line where this stage was
-     * defined by parsing the process's own debug symbols. Returns an
-     * empty string if no debug symbols were found or the debug
-     * symbols were not understood. Works on OS X and Linux only. */
-    std::string source_location() const;
-
-    /** Assert that this stage has intentionally been given no schedule, and
-     * suppress the warning about unscheduled update definitions that would
-     * otherwise fire. This counts as a schedule, so calling this twice on the
-     * same Stage will fail the assertion. */
-    void unscheduled();
 };
 
 // For backwards compatibility, keep the ScheduleHandle name.
 typedef Stage ScheduleHandle;
+
 
 class FuncTupleElementRef;
 
@@ -484,29 +314,29 @@ class FuncRef {
     /** Helper for function update by Tuple. If the function does not
      * already have a pure definition, init_val will be used as RHS of
      * each tuple element in the initial function definition. */
-    template<typename BinaryOp>
+    template <typename BinaryOp>
     Stage func_ref_update(const Tuple &e, int init_val);
 
     /** Helper for function update by Expr. If the function does not
      * already have a pure definition, init_val will be used as RHS in
      * the initial function definition. */
-    template<typename BinaryOp>
+    template <typename BinaryOp>
     Stage func_ref_update(Expr e, int init_val);
 
 public:
-    FuncRef(const Internal::Function &, const std::vector<Expr> &,
-            int placeholder_pos = -1, int count = 0);
+    FuncRef(Internal::Function, const std::vector<Expr> &,
+                int placeholder_pos = -1, int count = 0);
     FuncRef(Internal::Function, const std::vector<Var> &,
-            int placeholder_pos = -1, int count = 0);
+                int placeholder_pos = -1, int count = 0);
 
     /** Use this as the left-hand-side of a definition or an update definition
      * (see \ref RDom).
      */
-    Stage operator=(const Expr &);
+    EXPORT Stage operator=(Expr);
 
     /** Use this as the left-hand-side of a definition or an update definition
      * for a Func with multiple outputs. */
-    Stage operator=(const Tuple &);
+    EXPORT Stage operator=(const Tuple &);
 
     /** Define a stage that adds the given expression to this Func. If the
      * expression refers to some RDom, this performs a sum reduction of the
@@ -514,9 +344,9 @@ public:
      * pure definition, this sets it to zero.
      */
     // @{
-    Stage operator+=(Expr);
-    Stage operator+=(const Tuple &);
-    Stage operator+=(const FuncRef &);
+    EXPORT Stage operator+=(Expr);
+    EXPORT Stage operator+=(const Tuple &);
+    EXPORT Stage operator+=(const FuncRef &);
     // @}
 
     /** Define a stage that adds the negative of the given expression to this
@@ -525,9 +355,9 @@ public:
      * not already have a pure definition, this sets it to zero.
      */
     // @{
-    Stage operator-=(Expr);
-    Stage operator-=(const Tuple &);
-    Stage operator-=(const FuncRef &);
+    EXPORT Stage operator-=(Expr);
+    EXPORT Stage operator-=(const Tuple &);
+    EXPORT Stage operator-=(const FuncRef &);
     // @}
 
     /** Define a stage that multiplies this Func by the given expression. If the
@@ -536,9 +366,9 @@ public:
      * definition, this sets it to 1.
      */
     // @{
-    Stage operator*=(Expr);
-    Stage operator*=(const Tuple &);
-    Stage operator*=(const FuncRef &);
+    EXPORT Stage operator*=(Expr);
+    EXPORT Stage operator*=(const Tuple &);
+    EXPORT Stage operator*=(const FuncRef &);
     // @}
 
     /** Define a stage that divides this Func by the given expression.
@@ -547,46 +377,32 @@ public:
      * function does not already have a pure definition, this sets it to 1.
      */
     // @{
-    Stage operator/=(Expr);
-    Stage operator/=(const Tuple &);
-    Stage operator/=(const FuncRef &);
+    EXPORT Stage operator/=(Expr);
+    EXPORT Stage operator/=(const Tuple &);
+    EXPORT Stage operator/=(const FuncRef &);
     // @}
 
     /* Override the usual assignment operator, so that
      * f(x, y) = g(x, y) defines f.
      */
-    Stage operator=(const FuncRef &);
+    EXPORT Stage operator=(const FuncRef &);
 
     /** Use this as a call to the function, and not the left-hand-side
      * of a definition. Only works for single-output Funcs. */
-    operator Expr() const;
+    EXPORT operator Expr() const;
 
     /** When a FuncRef refers to a function that provides multiple
      * outputs, you can access each output as an Expr using
      * operator[].
      */
-    FuncTupleElementRef operator[](int) const;
+    EXPORT FuncTupleElementRef operator[](int) const;
 
     /** How many outputs does the function this refers to produce. */
-    size_t size() const;
+    EXPORT size_t size() const;
 
     /** What function is this calling? */
-    Internal::Function function() const {
-        return func;
-    }
+    EXPORT Internal::Function function() const {return func;}
 };
-
-/** Explicit overloads of min and max for FuncRef. These exist to
- * disambiguate calls to min on FuncRefs when a user has pulled both
- * Halide::min and std::min into their namespace. */
-// @{
-inline Expr min(const FuncRef &a, const FuncRef &b) {
-    return min(Expr(a), Expr(b));
-}
-inline Expr max(const FuncRef &a, const FuncRef &b) {
-    return max(Expr(a), Expr(b));
-}
-// @}
 
 /** A fragment of front-end syntax of the form f(x, y, z)[index], where x, y,
  * z are Vars or Exprs. If could be the left hand side of an update
@@ -595,28 +411,29 @@ inline Expr max(const FuncRef &a, const FuncRef &b) {
  */
 class FuncTupleElementRef {
     FuncRef func_ref;
-    std::vector<Expr> args;  // args to the function
-    int idx;                 // Index to function outputs
+    std::vector<Expr> args; // args to the function
+    int idx;                // Index to function outputs
 
     /** Helper function that generates a Tuple where element at 'idx' is set
      * to 'e' and the rests are undef. */
-    Tuple values_with_undefs(const Expr &e) const;
+    Tuple values_with_undefs(Expr e) const;
 
 public:
-    FuncTupleElementRef(const FuncRef &ref, const std::vector<Expr> &args, int idx);
+    FuncTupleElementRef(const FuncRef &ref, const std::vector<Expr>& args, int idx);
 
     /** Use this as the left-hand-side of an update definition of Tuple
      * component 'idx' of a Func (see \ref RDom). The function must
      * already have an initial definition.
      */
-    Stage operator=(const Expr &e);
+    EXPORT Stage operator=(Expr e);
+
 
     /** Define a stage that adds the given expression to Tuple component 'idx'
      * of this Func. The other Tuple components are unchanged. If the expression
      * refers to some RDom, this performs a sum reduction of the expression over
      * the domain. The function must already have an initial definition.
      */
-    Stage operator+=(const Expr &e);
+    EXPORT Stage operator+=(Expr e);
 
     /** Define a stage that adds the negative of the given expression to Tuple
      * component 'idx' of this Func. The other Tuple components are unchanged.
@@ -624,7 +441,7 @@ public:
      * the negative of the expression over the domain. The function must already
      * have an initial definition.
      */
-    Stage operator-=(const Expr &e);
+    EXPORT Stage operator-=(Expr e);
 
     /** Define a stage that multiplies Tuple component 'idx' of this Func by
      * the given expression. The other Tuple components are unchanged. If the
@@ -632,7 +449,7 @@ public:
      * the expression over the domain. The function must already have an
      * initial definition.
      */
-    Stage operator*=(const Expr &e);
+    EXPORT Stage operator*=(Expr e);
 
     /** Define a stage that divides Tuple component 'idx' of this Func by
      * the given expression. The other Tuple components are unchanged.
@@ -640,44 +457,28 @@ public:
      * reduction of the inverse of the expression over the domain. The function
      * must already have an initial definition.
      */
-    Stage operator/=(const Expr &e);
+    EXPORT Stage operator/=(Expr e);
 
     /* Override the usual assignment operator, so that
      * f(x, y)[index] = g(x, y) defines f.
      */
-    Stage operator=(const FuncRef &e);
+    EXPORT Stage operator=(const FuncRef &e);
 
     /** Use this as a call to Tuple component 'idx' of a Func, and not the
      * left-hand-side of a definition. */
-    operator Expr() const;
+    EXPORT operator Expr() const;
 
     /** What function is this calling? */
-    Internal::Function function() const {
-        return func_ref.function();
-    }
+    EXPORT Internal::Function function() const {return func_ref.function();}
 
     /** Return index to the function outputs. */
-    int index() const {
-        return idx;
-    }
+    EXPORT int index() const {return idx;}
 };
 
 namespace Internal {
+struct ErrorBuffer;
 class IRMutator;
-}  // namespace Internal
-
-/** Helper class for identifying purpose of an Expr passed to memoize.
- */
-class EvictionKey {
-protected:
-    Expr key;
-    friend class Func;
-
-public:
-    explicit EvictionKey(const Expr &expr = Expr())
-        : key(expr) {
-    }
-};
+}
 
 /** A halide function. This class represents one stage in a Halide
  * pipeline, and is the unit by which we schedule things. By default
@@ -706,50 +507,37 @@ class Func {
     Pipeline pipeline();
 
     // Helper function for recursive reordering support
-    Func &reorder_storage(const std::vector<Var> &dims, size_t start);
+    EXPORT Func &reorder_storage(const std::vector<Var> &dims, size_t start);
 
-    void invalidate_cache();
+    EXPORT void invalidate_cache();
 
 public:
+
     /** Declare a new undefined function with the given name */
-    explicit Func(const std::string &name);
-
-    /** Declare a new undefined function with the given name.
-     * The function will be constrained to represent Exprs of required_type.
-     * If required_dims is not AnyDims, the function will be constrained to exactly
-     * that many dimensions. */
-    explicit Func(const Type &required_type, int required_dims, const std::string &name);
-
-    /** Declare a new undefined function with the given name.
-     * If required_types is not empty, the function will be constrained to represent
-     * Tuples of the same arity and types. (If required_types is empty, there is no constraint.)
-     * If required_dims is not AnyDims, the function will be constrained to exactly
-     * that many dimensions. */
-    explicit Func(const std::vector<Type> &required_types, int required_dims, const std::string &name);
+    EXPORT explicit Func(const std::string &name);
 
     /** Declare a new undefined function with an
      * automatically-generated unique name */
-    Func();
+    EXPORT Func();
 
     /** Declare a new function with an automatically-generated unique
      * name, and define it to return the given expression (which may
      * not contain free variables). */
-    explicit Func(const Expr &e);
+    EXPORT explicit Func(Expr e);
 
     /** Construct a new Func to wrap an existing, already-define
      * Function object. */
-    explicit Func(Internal::Function f);
+    EXPORT explicit Func(Internal::Function f);
 
     /** Construct a new Func to wrap a Buffer. */
-    template<typename T, int Dims>
-    HALIDE_NO_USER_CODE_INLINE explicit Func(Buffer<T, Dims> &im)
-        : Func() {
+    template<typename T>
+    NO_INLINE explicit Func(Buffer<T> &im) : Func() {
         (*this)(_) = im(_);
     }
 
     /** Evaluate this function over some rectangular domain and return
      * the resulting buffer or buffers. Performs compilation if the
-     * Func has not previously been realized and compile_jit has not
+     * Func has not previously been realized and jit_compile has not
      * been called. If the final stage of the pipeline is on the GPU,
      * data is copied back to the host before being returned. The
      * returned Realization should probably be instantly converted to
@@ -772,60 +560,19 @@ public:
      Buffer<float> im1 = r[1];
      \endcode
      *
-     * In Halide formal arguments of a computation are specified using
-     * Param<T> and ImageParam objects in the expressions defining the
-     * computation. Note that this method is not thread-safe, in that
-     * Param<T> and ImageParam are globals shared by all threads; to call
-     * jitted code in a thread-safe manner, use compile_to_callable() instead.
-     *
-     \code
-     Param<int32> p(42);
-     ImageParam img(Int(32), 1);
-     f(x) = img(x) + p;
-
-     Buffer<int32_t) arg_img(10, 10);
-     <fill in arg_img...>
-
-     Target t = get_jit_target_from_environment();
-     Buffer<int32_t> result = f.realize({10, 10}, t);
-     \endcode
-     *
-     * Alternatively, an initializer list can be used
-     * directly in the realize call to pass this information:
-     *
-     \code
-     Param<int32> p(42);
-     ImageParam img(Int(32), 1);
-     f(x) = img(x) + p;
-
-     Buffer<int32_t) arg_img(10, 10);
-     <fill in arg_img...>
-
-     Target t = get_jit_target_from_environment();
-     Buffer<int32_t> result = f.realize({10, 10}, t, { { p, 17 }, { img, arg_img } });
-     \endcode
-     *
-     * If the Func cannot be realized into a buffer of the given size
-     * due to scheduling constraints on scattering update definitions,
-     * it will be realized into a larger buffer of the minimum size
-     * possible, and a cropped view at the requested size will be
-     * returned. It is thus not safe to assume the returned buffers
-     * are contiguous in memory. This behavior can be disabled with
-     * the NoBoundsQuery target flag, in which case an error about
-     * writing out of bounds on the output buffer will trigger
-     * instead.
-     *
      */
-    Realization realize(std::vector<int32_t> sizes = {}, const Target &target = Target());
-
-    /** Same as above, but takes a custom user-provided context to be
-     * passed to runtime functions. This can be used to pass state to
-     * runtime overrides in a thread-safe manner. A nullptr context is
-     * legal, and is equivalent to calling the variant of realize
-     * that does not take a context. */
-    Realization realize(JITUserContext *context,
-                        std::vector<int32_t> sizes = {},
-                        const Target &target = Target());
+    // @{
+    EXPORT Realization realize(std::vector<int32_t> sizes, const Target &target = Target());
+    EXPORT Realization realize(int x_size, int y_size, int z_size, int w_size,
+                               const Target &target = Target());
+    EXPORT Realization realize(int x_size, int y_size, int z_size,
+                               const Target &target = Target());
+    EXPORT Realization realize(int x_size, int y_size,
+                               const Target &target = Target());
+    EXPORT Realization realize(int x_size,
+                               const Target &target = Target());
+    EXPORT Realization realize(const Target &target = Target());
+    // @}
 
     /** Evaluate this function into an existing allocated buffer or
      * buffers. If the buffer is also one of the arguments to the
@@ -833,49 +580,27 @@ public:
      * necessarily safe to run in-place. If you pass multiple buffers,
      * they must have matching sizes. This form of realize does *not*
      * automatically copy data back from the GPU. */
-    void realize(Pipeline::RealizationArg outputs, const Target &target = Target());
-
-    /** Same as above, but takes a custom user-provided context to be
-     * passed to runtime functions. This can be used to pass state to
-     * runtime overrides in a thread-safe manner. A nullptr context is
-     * legal, and is equivalent to calling the variant of realize
-     * that does not take a context. */
-    void realize(JITUserContext *context,
-                 Pipeline::RealizationArg outputs,
-                 const Target &target = Target());
+    EXPORT void realize(Realization dst, const Target &target = Target());
 
     /** For a given size of output, or a given output buffer,
      * determine the bounds required of all unbound ImageParams
      * referenced. Communicates the result by allocating new buffers
      * of the appropriate size and binding them to the unbound
-     * ImageParams.
-     */
+     * ImageParams. */
     // @{
-    void infer_input_bounds(const std::vector<int32_t> &sizes,
-                            const Target &target = get_jit_target_from_environment());
-    void infer_input_bounds(Pipeline::RealizationArg outputs,
-                            const Target &target = get_jit_target_from_environment());
+    EXPORT void infer_input_bounds(int x_size = 0, int y_size = 0, int z_size = 0, int w_size = 0);
+    EXPORT void infer_input_bounds(Realization dst);
     // @}
 
-    /** Versions of infer_input_bounds that take a custom user context
-     * to pass to runtime functions. */
-    // @{
-    void infer_input_bounds(JITUserContext *context,
-                            const std::vector<int32_t> &sizes,
-                            const Target &target = get_jit_target_from_environment());
-    void infer_input_bounds(JITUserContext *context,
-                            Pipeline::RealizationArg outputs,
-                            const Target &target = get_jit_target_from_environment());
-    // @}
     /** Statically compile this function to llvm bitcode, with the
      * given filename (which should probably end in .bc), type
      * signature, and C function name (which defaults to the same name
      * as this halide function */
     //@{
-    void compile_to_bitcode(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
-                            const Target &target = get_target_from_environment());
-    void compile_to_bitcode(const std::string &filename, const std::vector<Argument> &,
-                            const Target &target = get_target_from_environment());
+    EXPORT void compile_to_bitcode(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
+                                   const Target &target = get_target_from_environment());
+    EXPORT void compile_to_bitcode(const std::string &filename, const std::vector<Argument> &,
+                                   const Target &target = get_target_from_environment());
     // @}
 
     /** Statically compile this function to llvm assembly, with the
@@ -883,10 +608,10 @@ public:
      * signature, and C function name (which defaults to the same name
      * as this halide function */
     //@{
-    void compile_to_llvm_assembly(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
-                                  const Target &target = get_target_from_environment());
-    void compile_to_llvm_assembly(const std::string &filename, const std::vector<Argument> &,
-                                  const Target &target = get_target_from_environment());
+    EXPORT void compile_to_llvm_assembly(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
+                                         const Target &target = get_target_from_environment());
+    EXPORT void compile_to_llvm_assembly(const std::string &filename, const std::vector<Argument> &,
+                                         const Target &target = get_target_from_environment());
     // @}
 
     /** Statically compile this function to an object file, with the
@@ -895,10 +620,10 @@ public:
      * as this halide function. You probably don't want to use this
      * directly; call compile_to_static_library or compile_to_file instead. */
     //@{
-    void compile_to_object(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
-                           const Target &target = get_target_from_environment());
-    void compile_to_object(const std::string &filename, const std::vector<Argument> &,
-                           const Target &target = get_target_from_environment());
+    EXPORT void compile_to_object(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
+                                  const Target &target = get_target_from_environment());
+    EXPORT void compile_to_object(const std::string &filename, const std::vector<Argument> &,
+                                  const Target &target = get_target_from_environment());
     // @}
 
     /** Emit a header file with the given filename for this
@@ -908,8 +633,8 @@ public:
      * function. You don't actually have to have defined this function
      * yet to call this. You probably don't want to use this directly;
      * call compile_to_static_library or compile_to_file instead. */
-    void compile_to_header(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name = "",
-                           const Target &target = get_target_from_environment());
+    EXPORT void compile_to_header(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name = "",
+                                  const Target &target = get_target_from_environment());
 
     /** Statically compile this function to text assembly equivalent
      * to the object file generated by compile_to_object. This is
@@ -917,49 +642,49 @@ public:
      * disassemble anything, or if you need to feed the assembly into
      * some custom toolchain to produce an object file (e.g. iOS) */
     //@{
-    void compile_to_assembly(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
-                             const Target &target = get_target_from_environment());
-    void compile_to_assembly(const std::string &filename, const std::vector<Argument> &,
-                             const Target &target = get_target_from_environment());
+    EXPORT void compile_to_assembly(const std::string &filename, const std::vector<Argument> &, const std::string &fn_name,
+                                    const Target &target = get_target_from_environment());
+    EXPORT void compile_to_assembly(const std::string &filename, const std::vector<Argument> &,
+                                    const Target &target = get_target_from_environment());
     // @}
 
     /** Statically compile this function to C source code. This is
      * useful for providing fallback code paths that will compile on
      * many platforms. Vectorization will fail, and parallelization
      * will produce serial code. */
-    void compile_to_c(const std::string &filename,
-                      const std::vector<Argument> &,
-                      const std::string &fn_name = "",
-                      const Target &target = get_target_from_environment());
+    EXPORT void compile_to_c(const std::string &filename,
+                             const std::vector<Argument> &,
+                             const std::string &fn_name = "",
+                             const Target &target = get_target_from_environment());
 
     /** Write out an internal representation of lowered code. Useful
      * for analyzing and debugging scheduling. Can emit html or plain
      * text. */
-    void compile_to_lowered_stmt(const std::string &filename,
-                                 const std::vector<Argument> &args,
-                                 StmtOutputFormat fmt = Text,
-                                 const Target &target = get_target_from_environment());
+    EXPORT void compile_to_lowered_stmt(const std::string &filename,
+                                        const std::vector<Argument> &args,
+                                        StmtOutputFormat fmt = Text,
+                                        const Target &target = get_target_from_environment());
 
     /** Write out the loop nests specified by the schedule for this
      * Function. Helpful for understanding what a schedule is
      * doing. */
-    void print_loop_nest();
+    EXPORT void print_loop_nest();
 
     /** Compile to object file and header pair, with the given
      * arguments. The name defaults to the same name as this halide
      * function.
      */
-    void compile_to_file(const std::string &filename_prefix, const std::vector<Argument> &args,
-                         const std::string &fn_name = "",
-                         const Target &target = get_target_from_environment());
+    EXPORT void compile_to_file(const std::string &filename_prefix, const std::vector<Argument> &args,
+                                const std::string &fn_name = "",
+                                const Target &target = get_target_from_environment());
 
     /** Compile to static-library file and header pair, with the given
      * arguments. The name defaults to the same name as this halide
      * function.
      */
-    void compile_to_static_library(const std::string &filename_prefix, const std::vector<Argument> &args,
-                                   const std::string &fn_name = "",
-                                   const Target &target = get_target_from_environment());
+    EXPORT void compile_to_static_library(const std::string &filename_prefix, const std::vector<Argument> &args,
+                                          const std::string &fn_name = "",
+                                          const Target &target = get_target_from_environment());
 
     /** Compile to static-library file and header pair once for each target;
      * each resulting function will be considered (in order) via halide_can_use_target_features()
@@ -968,63 +693,133 @@ public:
      * (e.g., SSE4.1/AVX/AVX2 on x86 desktop machines).
      * All targets must have identical arch-os-bits.
      */
-    void compile_to_multitarget_static_library(const std::string &filename_prefix,
-                                               const std::vector<Argument> &args,
-                                               const std::vector<Target> &targets);
-
-    /** Like compile_to_multitarget_static_library(), except that the object files
-     * are all output as object files (rather than bundled into a static library).
-     *
-     * `suffixes` is an optional list of strings to use for as the suffix for each object
-     * file. If nonempty, it must be the same length as `targets`. (If empty, Target::to_string()
-     * will be used for each suffix.)
-     *
-     * Note that if `targets.size()` > 1, the wrapper code (to select the subtarget)
-     * will be generated with the filename `${filename_prefix}_wrapper.o`
-     *
-     * Note that if `targets.size()` > 1 and `no_runtime` is not specified, the runtime
-     * will be generated with the filename `${filename_prefix}_runtime.o`
-     */
-    void compile_to_multitarget_object_files(const std::string &filename_prefix,
-                                             const std::vector<Argument> &args,
-                                             const std::vector<Target> &targets,
-                                             const std::vector<std::string> &suffixes);
+    EXPORT void compile_to_multitarget_static_library(const std::string &filename_prefix,
+                                                      const std::vector<Argument> &args,
+                                                      const std::vector<Target> &targets);
 
     /** Store an internal representation of lowered code as a self
      * contained Module suitable for further compilation. */
-    Module compile_to_module(const std::vector<Argument> &args, const std::string &fn_name = "",
-                             const Target &target = get_target_from_environment());
+    EXPORT Module compile_to_module(const std::vector<Argument> &args, const std::string &fn_name = "",
+                                    const Target &target = get_target_from_environment());
 
     /** Compile and generate multiple target files with single call.
      * Deduces target files based on filenames specified in
-     * output_files map.
+     * output_files struct.
      */
-    void compile_to(const std::map<OutputFileType, std::string> &output_files,
-                    const std::vector<Argument> &args,
-                    const std::string &fn_name,
-                    const Target &target = get_target_from_environment());
+    EXPORT void compile_to(const Outputs &output_files,
+                           const std::vector<Argument> &args,
+                           const std::string &fn_name,
+                           const Target &target = get_target_from_environment());
 
     /** Eagerly jit compile the function to machine code. This
      * normally happens on the first call to realize. If you're
      * running your halide pipeline inside time-sensitive code and
      * wish to avoid including the time taken to compile a pipeline,
-     * then you can call this ahead of time. Default is to use the Target
+     * then you can call this ahead of time. Returns the raw function
+     * pointer to the compiled pipeline. Default is to use the Target
      * returned from Halide::get_jit_target_from_environment()
      */
-    void compile_jit(const Target &target = get_jit_target_from_environment());
+    EXPORT void *compile_jit(const Target &target = get_jit_target_from_environment());
+
+    /** Set the error handler function that be called in the case of
+     * runtime errors during halide pipelines. If you are compiling
+     * statically, you can also just define your own function with
+     * signature
+     \code
+     extern "C" void halide_error(void *user_context, const char *);
+     \endcode
+     * This will clobber Halide's version.
+     */
+    EXPORT void set_error_handler(void (*handler)(void *, const char *));
+
+    /** Set a custom malloc and free for halide to use. Malloc should
+     * return 32-byte aligned chunks of memory, and it should be safe
+     * for Halide to read slightly out of bounds (up to 8 bytes before
+     * the start or beyond the end). If compiling statically, routines
+     * with appropriate signatures can be provided directly
+    \code
+     extern "C" void *halide_malloc(void *, size_t)
+     extern "C" void halide_free(void *, void *)
+     \endcode
+     * These will clobber Halide's versions. See \file HalideRuntime.h
+     * for declarations.
+     */
+    EXPORT void set_custom_allocator(void *(*malloc)(void *, size_t),
+                                     void (*free)(void *, void *));
+
+    /** Set a custom task handler to be called by the parallel for
+     * loop. It is useful to set this if you want to do some
+     * additional bookkeeping at the granularity of parallel
+     * tasks. The default implementation does this:
+     \code
+     extern "C" int halide_do_task(void *user_context,
+                                   int (*f)(void *, int, uint8_t *),
+                                   int idx, uint8_t *state) {
+         return f(user_context, idx, state);
+     }
+     \endcode
+     * If you are statically compiling, you can also just define your
+     * own version of the above function, and it will clobber Halide's
+     * version.
+     *
+     * If you're trying to use a custom parallel runtime, you probably
+     * don't want to call this. See instead \ref Func::set_custom_do_par_for .
+    */
+    EXPORT void set_custom_do_task(
+        int (*custom_do_task)(void *, int (*)(void *, int, uint8_t *),
+                              int, uint8_t *));
+
+    /** Set a custom parallel for loop launcher. Useful if your app
+     * already manages a thread pool. The default implementation is
+     * equivalent to this:
+     \code
+     extern "C" int halide_do_par_for(void *user_context,
+                                      int (*f)(void *, int, uint8_t *),
+                                      int min, int extent, uint8_t *state) {
+         int exit_status = 0;
+         parallel for (int idx = min; idx < min+extent; idx++) {
+             int job_status = halide_do_task(user_context, f, idx, state);
+             if (job_status) exit_status = job_status;
+         }
+         return exit_status;
+     }
+     \endcode
+     *
+     * However, notwithstanding the above example code, if one task
+     * fails, we may skip over other tasks, and if two tasks return
+     * different error codes, we may select one arbitrarily to return.
+     *
+     * If you are statically compiling, you can also just define your
+     * own version of the above function, and it will clobber Halide's
+     * version.
+     */
+    EXPORT void set_custom_do_par_for(
+        int (*custom_do_par_for)(void *, int (*)(void *, int, uint8_t *), int,
+                                 int, uint8_t *));
+
+    /** Set custom routines to call when tracing is enabled. Call this
+     * on the output Func of your pipeline. This then sets custom
+     * routines for the entire pipeline, not just calls to this
+     * Func.
+     *
+     * If you are statically compiling, you can also just define your
+     * own versions of the tracing functions (see HalideRuntime.h),
+     * and they will clobber Halide's versions. */
+    EXPORT void set_custom_trace(int (*trace_fn)(void *, const halide_trace_event_t *));
+
+    /** Set the function called to print messages from the runtime.
+     * If you are compiling statically, you can also just define your
+     * own function with signature
+     \code
+     extern "C" void halide_print(void *user_context, const char *);
+     \endcode
+     * This will clobber Halide's version.
+     */
+    EXPORT void set_custom_print(void (*handler)(void *, const char *));
 
     /** Get a struct containing the currently set custom functions
-     * used by JIT. This can be mutated. Changes will take effect the
-     * next time this Func is realized. */
-    JITHandlers &jit_handlers();
-
-    /** Eagerly jit compile the function to machine code and return a callable
-     * struct that behaves like a function pointer. The calling convention
-     * will exactly match that of an AOT-compiled version of this Func
-     * with the same Argument list.
-     */
-    Callable compile_to_callable(const std::vector<Argument> &args,
-                                 const Target &target = get_jit_target_from_environment());
+     * used by JIT. */
+    EXPORT const Internal::JITHandlers &jit_handlers();
 
     /** Add a custom pass to be used during lowering. It is run after
      * all other lowering passes. Can be used to verify properties of
@@ -1036,21 +831,24 @@ public:
     template<typename T>
     void add_custom_lowering_pass(T *pass) {
         // Template instantiate a custom deleter for this type, then
-        // wrap in a lambda. The custom deleter lives in user code, so
-        // that deletion is on the same heap as construction (I hate Windows).
-        add_custom_lowering_pass(pass, [pass]() { delete_lowering_pass<T>(pass); });
+        // cast it to a deleter that takes a IRMutator *. The custom
+        // deleter lives in user code, so that deletion is on the same
+        // heap as construction (I hate Windows).
+        void (*deleter)(Internal::IRMutator *) =
+            (void (*)(Internal::IRMutator *))(&delete_lowering_pass<T>);
+        add_custom_lowering_pass(pass, deleter);
     }
 
     /** Add a custom pass to be used during lowering, with the
      * function that will be called to delete it also passed in. Set
      * it to nullptr if you wish to retain ownership of the object. */
-    void add_custom_lowering_pass(Internal::IRMutator *pass, std::function<void()> deleter);
+    EXPORT void add_custom_lowering_pass(Internal::IRMutator *pass, void (*deleter)(Internal::IRMutator *));
 
     /** Remove all previously-set custom lowering passes */
-    void clear_custom_lowering_passes();
+    EXPORT void clear_custom_lowering_passes();
 
     /** Get the custom lowering passes. */
-    const std::vector<CustomLoweringPass> &custom_lowering_passes();
+    EXPORT const std::vector<CustomLoweringPass> &custom_lowering_passes();
 
     /** When this function is compiled, include code that dumps its
      * values to a file after it is realized, for the purpose of
@@ -1070,138 +868,97 @@ public:
      * data follows the header, as a densely packed array of the given
      * size and the given type. If given the extension .tmp, this file
      * format can be natively read by the program ImageStack. */
-    void debug_to_file(const std::string &filename);
+    EXPORT void debug_to_file(const std::string &filename);
 
     /** The name of this function, either given during construction,
      * or automatically generated. */
-    const std::string &name() const;
+    EXPORT const std::string &name() const;
 
     /** Get the pure arguments. */
-    std::vector<Var> args() const;
+    EXPORT std::vector<Var> args() const;
 
     /** The right-hand-side value of the pure definition of this
      * function. Causes an error if there's no pure definition, or if
      * the function is defined to return multiple values. */
-    Expr value() const;
+    EXPORT Expr value() const;
 
     /** The values returned by this function. An error if the function
      * has not been been defined. Returns a Tuple with one element for
      * functions defined to return a single value. */
-    Tuple values() const;
+    EXPORT Tuple values() const;
 
     /** Does this function have at least a pure definition. */
-    bool defined() const;
+    EXPORT bool defined() const;
 
     /** Get the left-hand-side of the update definition. An empty
      * vector if there's no update definition. If there are
      * multiple update definitions for this function, use the
      * argument to select which one you want. */
-    const std::vector<Expr> &update_args(int idx = 0) const;
+    EXPORT const std::vector<Expr> &update_args(int idx = 0) const;
 
     /** Get the right-hand-side of an update definition. An error if
      * there's no update definition. If there are multiple
      * update definitions for this function, use the argument to
      * select which one you want. */
-    Expr update_value(int idx = 0) const;
+    EXPORT Expr update_value(int idx = 0) const;
 
     /** Get the right-hand-side of an update definition for
      * functions that returns multiple values. An error if there's no
      * update definition. Returns a Tuple with one element for
      * functions that return a single value. */
-    Tuple update_values(int idx = 0) const;
+    EXPORT Tuple update_values(int idx = 0) const;
 
     /** Get the RVars of the reduction domain for an update definition, if there is
      * one. */
-    std::vector<RVar> rvars(int idx = 0) const;
+    EXPORT std::vector<RVar> rvars(int idx = 0) const;
 
     /** Does this function have at least one update definition? */
-    bool has_update_definition() const;
+    EXPORT bool has_update_definition() const;
 
     /** How many update definitions does this function have? */
-    int num_update_definitions() const;
+    EXPORT int num_update_definitions() const;
 
     /** Is this function an external stage? That is, was it defined
      * using define_extern? */
-    bool is_extern() const;
+    EXPORT bool is_extern() const;
 
     /** Add an extern definition for this Func. This lets you define a
      * Func that represents an external pipeline stage. You can, for
      * example, use it to wrap a call to an extern library such as
      * fftw. */
     // @{
-    void define_extern(const std::string &function_name,
-                       const std::vector<ExternFuncArgument> &params, Type t,
-                       int dimensionality,
-                       NameMangling mangling = NameMangling::Default,
-                       DeviceAPI device_api = DeviceAPI::Host) {
-        define_extern(function_name, params, t,
-                      Internal::make_argument_list(dimensionality), mangling,
-                      device_api);
+    EXPORT void define_extern(const std::string &function_name,
+                              const std::vector<ExternFuncArgument> &params,
+                              Type t,
+                              int dimensionality,
+                              NameMangling mangling = NameMangling::Default,
+                              bool uses_old_buffer_t = false /* currently does nothing. See PR #1899. */) {
+        define_extern(function_name, params, std::vector<Type>{t},
+                      dimensionality, mangling, uses_old_buffer_t);
     }
 
-    void define_extern(const std::string &function_name,
-                       const std::vector<ExternFuncArgument> &params,
-                       const std::vector<Type> &types, int dimensionality,
-                       NameMangling mangling) {
-        define_extern(function_name, params, types,
-                      Internal::make_argument_list(dimensionality), mangling);
-    }
-
-    void define_extern(const std::string &function_name,
-                       const std::vector<ExternFuncArgument> &params,
-                       const std::vector<Type> &types, int dimensionality,
-                       NameMangling mangling = NameMangling::Default,
-                       DeviceAPI device_api = DeviceAPI::Host) {
-        define_extern(function_name, params, types,
-                      Internal::make_argument_list(dimensionality), mangling,
-                      device_api);
-    }
-
-    void define_extern(const std::string &function_name,
-                       const std::vector<ExternFuncArgument> &params, Type t,
-                       const std::vector<Var> &arguments,
-                       NameMangling mangling = NameMangling::Default,
-                       DeviceAPI device_api = DeviceAPI::Host) {
-        define_extern(function_name, params, std::vector<Type>{t}, arguments,
-                      mangling, device_api);
-    }
-
-    void define_extern(const std::string &function_name,
-                       const std::vector<ExternFuncArgument> &params,
-                       const std::vector<Type> &types,
-                       const std::vector<Var> &arguments,
-                       NameMangling mangling = NameMangling::Default,
-                       DeviceAPI device_api = DeviceAPI::Host);
+    EXPORT void define_extern(const std::string &function_name,
+                              const std::vector<ExternFuncArgument> &params,
+                              const std::vector<Type> &types,
+                              int dimensionality,
+                              NameMangling mangling = NameMangling::Default,
+                              bool uses_old_buffer_t = false /* currently does nothing. See PR #1899. */);
     // @}
 
-    /** Get the type(s) of the outputs of this Func.
-     *
-     * It is not legal to call type() unless the Func has non-Tuple elements.
-     *
-     * If the Func isn't yet defined, and was not specified with required types,
-     * a runtime error will occur.
-     *
-     * If the Func isn't yet defined, but *was* specified with required types,
-     * the requirements will be returned. */
-    // @{
-    const Type &type() const;
-    const std::vector<Type> &types() const;
-    // @}
+    /** Get the types of the outputs of this Func. */
+    EXPORT const std::vector<Type> &output_types() const;
 
     /** Get the number of outputs of this Func. Corresponds to the
-     * size of the Tuple this Func was defined to return.
-     * If the Func isn't yet defined, but was specified with required types,
-     * the number of outputs specified in the requirements will be returned. */
-    int outputs() const;
+     * size of the Tuple this Func was defined to return. */
+    EXPORT int outputs() const;
 
     /** Get the name of the extern function called for an extern
      * definition. */
-    const std::string &extern_function_name() const;
+    EXPORT const std::string &extern_function_name() const;
 
-    /** The dimensionality (number of arguments) of this function.
-     * If the Func isn't yet defined, but was specified with required dimensionality,
-     * the dimensionality specified in the requirements will be returned. */
-    int dimensions() const;
+    /** The dimensionality (number of arguments) of this
+     * function. Zero if the function is not yet defined. */
+    EXPORT int dimensions() const;
 
     /** Construct either the left-hand-side of a definition, or a call
      * to a functions that happens to only contain vars as
@@ -1210,11 +967,11 @@ public:
      * enough implicit vars are added to the end of the argument list
      * to make up the difference (see \ref Var::implicit) */
     // @{
-    FuncRef operator()(std::vector<Var>) const;
+    EXPORT FuncRef operator()(std::vector<Var>) const;
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE typename std::enable_if<Internal::all_are_convertible<Var, Args...>::value, FuncRef>::type
-    operator()(Args &&...args) const {
+    template <typename... Args>
+    NO_INLINE typename std::enable_if<Internal::all_are_convertible<Var, Args...>::value, FuncRef>::type
+    operator()(Args&&... args) const {
         std::vector<Var> collected_args{std::forward<Args>(args)...};
         return this->operator()(collected_args);
     }
@@ -1227,17 +984,17 @@ public:
      * the end of the argument list to make up the difference. (see
      * \ref Var::implicit)*/
     // @{
-    FuncRef operator()(std::vector<Expr>) const;
+    EXPORT FuncRef operator()(std::vector<Expr>) const;
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE typename std::enable_if<Internal::all_are_convertible<Expr, Args...>::value, FuncRef>::type
-    operator()(const Expr &x, Args &&...args) const {
+    template <typename... Args>
+    NO_INLINE typename std::enable_if<Internal::all_are_convertible<Expr, Args...>::value, FuncRef>::type
+    operator()(Expr x, Args&&... args) const {
         std::vector<Expr> collected_args{x, std::forward<Args>(args)...};
         return (*this)(collected_args);
     }
     // @}
 
-    /** Creates and returns a new identity Func that wraps this Func. During
+    /** Creates and returns a new Func that wraps this Func. During
      * compilation, Halide replaces all calls to this Func done by 'f'
      * with calls to the wrapper. If this Func is already wrapped for
      * use in 'f', will return the existing wrapper.
@@ -1324,67 +1081,19 @@ public:
          g(x, y) = f_wrap(x, y)
      \endcode
      */
-    Func in(const Func &f);
+    EXPORT Func in(const Func &f);
 
-    /** Create and return an identity wrapper shared by all the Funcs in
-     * 'fs'. If any of the Funcs in 'fs' already have a custom wrapper,
-     * this will throw an error. */
-    Func in(const std::vector<Func> &fs);
+    /** Create and return a wrapper shared by all the Funcs in
+     * 'fs'. If any of the Funcs in 'fs' already have a custom
+     * wrapper, this will throw an error. */
+    EXPORT Func in(const std::vector<Func> &fs);
 
-    /** Create and return a global identity wrapper, which wraps all calls to
-     * this Func by any other Func. If a global wrapper already exists,
-     * returns it. The global identity wrapper is only used by callers for
-     * which no custom wrapper has been specified.
-     */
-    Func in();
-
-    /** Similar to \ref Func::in; however, instead of replacing the call to
-     * this Func with an identity Func that refers to it, this replaces the
-     * call with a clone of this Func.
-     *
-     * For example, f.clone_in(g) would rewrite a pipeline like this:
-     \code
-     f(x, y) = x + y;
-     g(x, y) = f(x, y) + 2;
-     h(x, y) = f(x, y) - 3;
-     \endcode
-     * into a pipeline like this:
-     \code
-     f(x, y) = x + y;
-     f_clone(x, y) = x + y;
-     g(x, y) = f_clone(x, y) + 2;
-     h(x, y) = f(x, y) - 3;
-     \endcode
-     *
-     */
-    //@{
-    Func clone_in(const Func &f);
-    Func clone_in(const std::vector<Func> &fs);
-    //@}
-
-    /** Declare that this function should be implemented by a call to
-     * halide_buffer_copy with the given target device API. Asserts
-     * that the Func has a pure definition which is a simple call to a
-     * single input, and no update definitions. The wrapper Funcs
-     * returned by in() are suitable candidates. Consumes all pure
-     * variables, and rewrites the Func to have an extern definition
-     * that calls halide_buffer_copy. */
-    Func copy_to_device(DeviceAPI d = DeviceAPI::Default_GPU);
-
-    /** Declare that this function should be implemented by a call to
-     * halide_buffer_copy with a NULL target device API. Equivalent to
-     * copy_to_device(DeviceAPI::Host). Asserts that the Func has a
-     * pure definition which is a simple call to a single input, and
-     * no update definitions. The wrapper Funcs returned by in() are
-     * suitable candidates. Consumes all pure variables, and rewrites
-     * the Func to have an extern definition that calls
-     * halide_buffer_copy.
-     *
-     * Note that if the source Func is already valid in host memory,
-     * this compiles to code that does the minimum number of calls to
-     * memcpy.
-     */
-    Func copy_to_host();
+    /** Create and return a global wrapper, which wraps all calls to
+     * this Func by any other Func. If a global wrapper already
+     * exists, returns it. The global wrapper is only used by callers
+     * for which no custom wrapper has been specified.
+    */
+    EXPORT Func in();
 
     /** Split a dimension into inner and outer subdimensions with the
      * given names, where the inner dimension iterates from 0 to
@@ -1393,18 +1102,18 @@ public:
      * variable name as either the inner or outer variable. The final
      * argument specifies how the tail should be handled if the split
      * factor does not provably divide the extent. */
-    Func &split(const VarOrRVar &old, const VarOrRVar &outer, const VarOrRVar &inner, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Func &split(VarOrRVar old, VarOrRVar outer, VarOrRVar inner, Expr factor, TailStrategy tail = TailStrategy::Auto);
 
-    /** Join two dimensions into a single fused dimension. The fused
+    /** Join two dimensions into a single fused dimenion. The fused
      * dimension covers the product of the extents of the inner and
      * outer dimensions given. */
-    Func &fuse(const VarOrRVar &inner, const VarOrRVar &outer, const VarOrRVar &fused);
+    EXPORT Func &fuse(VarOrRVar inner, VarOrRVar outer, VarOrRVar fused);
 
     /** Mark a dimension to be traversed serially. This is the default. */
-    Func &serial(const VarOrRVar &var);
+    EXPORT Func &serial(VarOrRVar var);
 
     /** Mark a dimension to be traversed in parallel */
-    Func &parallel(const VarOrRVar &var);
+    EXPORT Func &parallel(VarOrRVar var);
 
     /** Split a dimension by the given task_size, and the parallelize the
      * outer dimension. This creates parallel tasks that have size
@@ -1412,7 +1121,7 @@ public:
      * the split. The inner dimension has a new anonymous name. If you
      * wish to mutate it, or schedule with respect to it, do the split
      * manually. */
-    Func &parallel(const VarOrRVar &var, const Expr &task_size, TailStrategy tail = TailStrategy::Auto);
+    EXPORT Func &parallel(VarOrRVar var, Expr task_size, TailStrategy tail = TailStrategy::Auto);
 
     /** Mark a dimension to be computed all-at-once as a single
      * vector. The dimension should have constant extent -
@@ -1420,26 +1129,26 @@ public:
      * constant factor. For most uses of vectorize you want the two
      * argument form. The variable to be vectorized should be the
      * innermost one. */
-    Func &vectorize(const VarOrRVar &var);
+    EXPORT Func &vectorize(VarOrRVar var);
 
     /** Mark a dimension to be completely unrolled. The dimension
      * should have constant extent - e.g. because it is the inner
      * dimension following a split by a constant factor. For most uses
      * of unroll you want the two-argument form. */
-    Func &unroll(const VarOrRVar &var);
+    EXPORT Func &unroll(VarOrRVar var);
 
     /** Split a dimension by the given factor, then vectorize the
      * inner dimension. This is how you vectorize a loop of unknown
      * size. The variable to be vectorized should be the innermost
      * one. After this call, var refers to the outer dimension of the
-     * split. 'factor' must be an integer. */
-    Func &vectorize(const VarOrRVar &var, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
+     * split. */
+    EXPORT Func &vectorize(VarOrRVar var, int factor, TailStrategy tail = TailStrategy::Auto);
 
     /** Split a dimension by the given factor, then unroll the inner
      * dimension. This is how you unroll a loop of unknown size by
      * some constant factor. After this call, var refers to the outer
-     * dimension of the split. 'factor' must be an integer. */
-    Func &unroll(const VarOrRVar &var, const Expr &factor, TailStrategy tail = TailStrategy::Auto);
+     * dimension of the split. */
+    EXPORT Func &unroll(VarOrRVar var, int factor, TailStrategy tail = TailStrategy::Auto);
 
     /** Statically declare that the range over which a function should
      * be evaluated is given by the second and third arguments. This
@@ -1449,21 +1158,7 @@ public:
      * splitting it up. If bounds inference decides that it requires
      * more of this function than the bounds you have stated, a
      * runtime error will occur when you try to run your pipeline. */
-    Func &bound(const Var &var, Expr min, Expr extent);
-
-    /** Statically declare the range over which the function will be
-     * evaluated in the general case. This provides a basis for the auto
-     * scheduler to make trade-offs and scheduling decisions. The auto
-     * generated schedules might break when the sizes of the dimensions are
-     * very different from the estimates specified. These estimates are used
-     * only by the auto scheduler if the function is a pipeline output. */
-    Func &set_estimate(const Var &var, const Expr &min, const Expr &extent);
-
-    /** Set (min, extent) estimates for all dimensions in the Func
-     * at once; this is equivalent to calling `set_estimate(args()[n], min, extent)`
-     * repeatedly, but slightly terser. The size of the estimates vector
-     * must match the dimensionality of the Func. */
-    Func &set_estimates(const Region &estimates);
+    EXPORT Func &bound(Var var, Expr min, Expr extent);
 
     /** Expand the region computed so that the min coordinates is
      * congruent to 'remainder' modulo 'modulus', and the extent is a
@@ -1472,18 +1167,8 @@ public:
      * f.align_bounds(x, 2, 1) forces the min to be odd and the extent
      * to be even. The region computed always contains the region that
      * would have been computed without this directive, so no
-     * assertions are injected.
-     */
-    Func &align_bounds(const Var &var, Expr modulus, Expr remainder = 0);
-
-    /** Expand the region computed so that the extent is a
-     * multiple of 'modulus'. For example, f.align_extent(x, 2) forces
-     * the extent realized to be even. The region computed always contains the
-     * region that would have been computed without this directive, so no
-     * assertions are injected. (This is essentially equivalent to align_bounds(),
-     * but always leaving the min untouched.)
-     */
-    Func &align_extent(const Var &var, Expr modulus);
+     * assertions are injected. */
+    EXPORT Func &align_bounds(Var var, Expr modulus, Expr remainder = 0);
 
     /** Bound the extent of a Func's realization, but not its
      * min. This means the dimension can be unrolled or vectorized
@@ -1491,57 +1176,37 @@ public:
      * compute_at tiles of another Func). This can also be useful for
      * forcing a function's allocation to be a fixed size, which often
      * means it can go on the stack. */
-    Func &bound_extent(const Var &var, Expr extent);
+    EXPORT Func &bound_extent(Var var, Expr extent);
 
     /** Split two dimensions at once by the given factors, and then
      * reorder the resulting dimensions to be xi, yi, xo, yo from
      * innermost outwards. This gives a tiled traversal. */
-    Func &tile(const VarOrRVar &x, const VarOrRVar &y,
-               const VarOrRVar &xo, const VarOrRVar &yo,
-               const VarOrRVar &xi, const VarOrRVar &yi,
-               const Expr &xfactor, const Expr &yfactor,
-               TailStrategy tail = TailStrategy::Auto);
+    EXPORT Func &tile(VarOrRVar x, VarOrRVar y,
+                      VarOrRVar xo, VarOrRVar yo,
+                      VarOrRVar xi, VarOrRVar yi,
+                      Expr xfactor, Expr yfactor,
+                      TailStrategy tail = TailStrategy::Auto);
 
     /** A shorter form of tile, which reuses the old variable names as
      * the new outer dimensions */
-    Func &tile(const VarOrRVar &x, const VarOrRVar &y,
-               const VarOrRVar &xi, const VarOrRVar &yi,
-               const Expr &xfactor, const Expr &yfactor,
-               TailStrategy tail = TailStrategy::Auto);
-
-    /** A more general form of tile, which defines tiles of any dimensionality. */
-    Func &tile(const std::vector<VarOrRVar> &previous,
-               const std::vector<VarOrRVar> &outers,
-               const std::vector<VarOrRVar> &inners,
-               const std::vector<Expr> &factors,
-               const std::vector<TailStrategy> &tails);
-
-    /** The generalized tile, with a single tail strategy to apply to all vars. */
-    Func &tile(const std::vector<VarOrRVar> &previous,
-               const std::vector<VarOrRVar> &outers,
-               const std::vector<VarOrRVar> &inners,
-               const std::vector<Expr> &factors,
-               TailStrategy tail = TailStrategy::Auto);
-
-    /** Generalized tiling, reusing the previous names as the outer names. */
-    Func &tile(const std::vector<VarOrRVar> &previous,
-               const std::vector<VarOrRVar> &inners,
-               const std::vector<Expr> &factors,
-               TailStrategy tail = TailStrategy::Auto);
+    EXPORT Func &tile(VarOrRVar x, VarOrRVar y,
+                      VarOrRVar xi, VarOrRVar yi,
+                      Expr xfactor, Expr yfactor,
+                      TailStrategy tail = TailStrategy::Auto);
 
     /** Reorder variables to have the given nesting order, from
      * innermost out */
-    Func &reorder(const std::vector<VarOrRVar> &vars);
+    EXPORT Func &reorder(const std::vector<VarOrRVar> &vars);
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE typename std::enable_if<Internal::all_are_convertible<VarOrRVar, Args...>::value, Func &>::type
-    reorder(const VarOrRVar &x, const VarOrRVar &y, Args &&...args) {
+    template <typename... Args>
+    NO_INLINE typename std::enable_if<Internal::all_are_convertible<VarOrRVar, Args...>::value, Func &>::type
+    reorder(VarOrRVar x, VarOrRVar y, Args&&... args) {
         std::vector<VarOrRVar> collected_args{x, y, std::forward<Args>(args)...};
         return reorder(collected_args);
     }
 
     /** Rename a dimension. Equivalent to split with a inner size of one. */
-    Func &rename(const VarOrRVar &old_name, const VarOrRVar &new_name);
+    EXPORT Func &rename(VarOrRVar old_name, VarOrRVar new_name);
 
     /** Specify that race conditions are permitted for this Func,
      * which enables parallelizing over RVars even when Halide cannot
@@ -1549,57 +1214,8 @@ public:
      * and only if you can prove to yourself that this is safe, as it
      * may result in a non-deterministic routine that returns
      * different values at different times or on different machines. */
-    Func &allow_race_conditions();
+    EXPORT Func &allow_race_conditions();
 
-    /** Issue atomic updates for this Func. This allows parallelization
-     * on associative RVars. The function throws a compile error when
-     * Halide fails to prove associativity. Use override_associativity_test
-     * to disable the associativity test if you believe the function is
-     * associative or the order of reduction variable execution does not
-     * matter.
-     * Halide compiles this into hardware atomic operations whenever possible,
-     * and falls back to a mutex lock per storage element if it is impossible
-     * to atomically update.
-     * There are three possible outcomes of the compiled code:
-     * atomic add, compare-and-swap loop, and mutex lock.
-     * For example:
-     *
-     * hist(x) = 0;
-     * hist(im(r)) += 1;
-     * hist.compute_root();
-     * hist.update().atomic().parallel();
-     *
-     * will be compiled to atomic add operations.
-     *
-     * hist(x) = 0;
-     * hist(im(r)) = min(hist(im(r)) + 1, 100);
-     * hist.compute_root();
-     * hist.update().atomic().parallel();
-     *
-     * will be compiled to compare-and-swap loops.
-     *
-     * arg_max() = {0, im(0)};
-     * Expr old_index = arg_max()[0];
-     * Expr old_max   = arg_max()[1];
-     * Expr new_index = select(old_max < im(r), r, old_index);
-     * Expr new_max   = max(im(r), old_max);
-     * arg_max() = {new_index, new_max};
-     * arg_max.compute_root();
-     * arg_max.update().atomic().parallel();
-     *
-     * will be compiled to updates guarded by a mutex lock,
-     * since it is impossible to atomically update two different locations.
-     *
-     * Currently the atomic operation is supported by x86, CUDA, and OpenCL backends.
-     * Compiling to other backends results in a compile error.
-     * If an operation is compiled into a mutex lock, and is vectorized or is
-     * compiled to CUDA or OpenCL, it also results in a compile error,
-     * since per-element mutex lock on vectorized operation leads to a
-     * deadlock.
-     * Vectorization of predicated RVars (through rdom.where()) on CPU
-     * is also unsupported yet (see https://github.com/halide/Halide/issues/4298).
-     * 8-bit and 16-bit atomics on GPU are also not supported. */
-    Func &atomic(bool override_associativity_test = false);
 
     /** Specialize a Func. This creates a special-case version of the
      * Func where the given condition is true. The most effective
@@ -1765,49 +1381,7 @@ public:
      * When cond is true, this is equivalent to g.compute_at(f,y).
      * When it is false, this is equivalent to g.compute_at(f,x).
      */
-    Stage specialize(const Expr &condition);
-
-    /** Add a specialization to a Func that always terminates execution
-     * with a call to halide_error(). By itself, this is of limited use,
-     * but can be useful to terminate chains of specialize() calls where
-     * no "default" case is expected (thus avoiding unnecessary code generation).
-     *
-     * For instance, say we want to optimize a pipeline to process images
-     * in planar and interleaved format; we might typically do something like:
-     \code
-     ImageParam im(UInt(8), 3);
-     Func f = do_something_with(im);
-     f.specialize(im.dim(0).stride() == 1).vectorize(x, 8);  // planar
-     f.specialize(im.dim(2).stride() == 1).reorder(c, x, y).vectorize(c);  // interleaved
-     \endcode
-     * This code will vectorize along rows for the planar case, and across pixel
-     * components for the interleaved case... but there is an implicit "else"
-     * for the unhandled cases, which generates unoptimized code. If we never
-     * anticipate passing any other sort of images to this, we code streamline
-     * our code by adding specialize_fail():
-     \code
-     ImageParam im(UInt(8), 3);
-     Func f = do_something(im);
-     f.specialize(im.dim(0).stride() == 1).vectorize(x, 8);  // planar
-     f.specialize(im.dim(2).stride() == 1).reorder(c, x, y).vectorize(c);  // interleaved
-     f.specialize_fail("Unhandled image format");
-     \endcode
-     * Conceptually, this produces codes like:
-     \code
-     if (im.dim(0).stride() == 1) {
-        do_something_planar();
-     } else if (im.dim(2).stride() == 1) {
-        do_something_interleaved();
-     } else {
-        halide_error("Unhandled image format");
-     }
-     \endcode
-     *
-     * Note that calling specialize_fail() terminates the specialization chain
-     * for a given Func; you cannot create new specializations for the Func
-     * afterwards (though you can retrieve handles to previous specializations).
-     */
-    void specialize_fail(const std::string &message);
+    EXPORT Stage specialize(Expr condition);
 
     /** Tell Halide that the following dimensions correspond to GPU
      * thread indices. This is useful if you compute a producer
@@ -1816,32 +1390,51 @@ public:
      * threads. If the selected target is not an appropriate GPU, this
      * just marks those dimensions as parallel. */
     // @{
-    Func &gpu_threads(const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_threads(const VarOrRVar &thread_x, const VarOrRVar &thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_threads(const VarOrRVar &thread_x, const VarOrRVar &thread_y, const VarOrRVar &thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_threads(VarOrRVar thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_threads(VarOrRVar thread_x, VarOrRVar thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_threads(VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
     // @}
-
-    /** The given dimension corresponds to the lanes in a GPU
-     * warp. GPU warp lanes are distinguished from GPU threads by the
-     * fact that all warp lanes run together in lockstep, which
-     * permits lightweight communication of data from one lane to
-     * another. */
-    Func &gpu_lanes(const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
 
     /** Tell Halide to run this stage using a single gpu thread and
      * block. This is not an efficient use of your GPU, but it can be
      * useful to avoid copy-back for intermediate update stages that
      * touch a very small part of your Func. */
-    Func &gpu_single_thread(DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_single_thread(DeviceAPI device_api = DeviceAPI::Default_GPU);
+
+    /** \deprecated Old name for #gpu_threads. */
+    // @{
+    EXPORT Func &cuda_threads(VarOrRVar thread_x) {
+        return gpu_threads(thread_x);
+    }
+    EXPORT Func &cuda_threads(VarOrRVar thread_x, VarOrRVar thread_y) {
+        return gpu_threads(thread_x, thread_y);
+    }
+    EXPORT Func &cuda_threads(VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z) {
+        return gpu_threads(thread_x, thread_y, thread_z);
+    }
+    // @}
 
     /** Tell Halide that the following dimensions correspond to GPU
      * block indices. This is useful for scheduling stages that will
      * run serially within each GPU block. If the selected target is
      * not ptx, this just marks those dimensions as parallel. */
     // @{
-    Func &gpu_blocks(const VarOrRVar &block_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_blocks(const VarOrRVar &block_x, const VarOrRVar &block_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_blocks(const VarOrRVar &block_x, const VarOrRVar &block_y, const VarOrRVar &block_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_blocks(VarOrRVar block_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_blocks(VarOrRVar block_x, VarOrRVar block_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_blocks(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // @}
+
+    /** \deprecated Old name for #gpu_blocks. */
+    // @{
+    EXPORT Func &cuda_blocks(VarOrRVar block_x) {
+        return gpu_blocks(block_x);
+    }
+    EXPORT Func &cuda_blocks(VarOrRVar block_x, VarOrRVar block_y) {
+        return gpu_blocks(block_x, block_y);
+    }
+    EXPORT Func &cuda_blocks(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z) {
+        return gpu_blocks(block_x, block_y, block_z);
+    }
     // @}
 
     /** Tell Halide that the following dimensions correspond to GPU
@@ -1850,11 +1443,26 @@ public:
      * dimensions are consumed by this call, so do all other
      * unrolling, reordering, etc first. */
     // @{
-    Func &gpu(const VarOrRVar &block_x, const VarOrRVar &thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu(const VarOrRVar &block_x, const VarOrRVar &block_y,
-              const VarOrRVar &thread_x, const VarOrRVar &thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu(const VarOrRVar &block_x, const VarOrRVar &block_y, const VarOrRVar &block_z,
-              const VarOrRVar &thread_x, const VarOrRVar &thread_y, const VarOrRVar &thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu(VarOrRVar block_x, VarOrRVar thread_x, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu(VarOrRVar block_x, VarOrRVar block_y,
+                     VarOrRVar thread_x, VarOrRVar thread_y, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z,
+                     VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z, DeviceAPI device_api = DeviceAPI::Default_GPU);
+    // @}
+
+    /** \deprecated Old name for #gpu. */
+    // @{
+    EXPORT Func &cuda(VarOrRVar block_x, VarOrRVar thread_x) {
+        return gpu(block_x, thread_x);
+    }
+    EXPORT Func &cuda(VarOrRVar block_x, VarOrRVar block_y,
+                      VarOrRVar thread_x, VarOrRVar thread_y) {
+        return gpu(block_x, thread_x, block_y, thread_y);
+    }
+    EXPORT Func &cuda(VarOrRVar block_x, VarOrRVar block_y, VarOrRVar block_z,
+                      VarOrRVar thread_x, VarOrRVar thread_y, VarOrRVar thread_z) {
+        return gpu(block_x, thread_x, block_y, thread_y, block_z, thread_z);
+    }
     // @}
 
     /** Short-hand for tiling a domain and mapping the tile indices
@@ -1862,132 +1470,112 @@ public:
      * GPU thread indices. Consumes the variables given, so do all
      * other scheduling first. */
     // @{
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &bx, const VarOrRVar &tx, const Expr &x_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar bx, Var tx, int x_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar bx, RVar tx, int x_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &tx, const Expr &x_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &y,
-                   const VarOrRVar &bx, const VarOrRVar &by,
-                   const VarOrRVar &tx, const VarOrRVar &ty,
-                   const Expr &x_size, const Expr &y_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar tx, int x_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y,
+                          VarOrRVar bx, VarOrRVar by,
+                          VarOrRVar tx, VarOrRVar ty,
+                          int x_size, int y_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &y,
-                   const VarOrRVar &tx, const VarOrRVar &ty,
-                   const Expr &x_size, const Expr &y_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y,
+                          VarOrRVar tx, Var ty,
+                          int x_size, int y_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y,
+                          VarOrRVar tx, RVar ty,
+                          int x_size, int y_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
 
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &y, const VarOrRVar &z,
-                   const VarOrRVar &bx, const VarOrRVar &by, const VarOrRVar &bz,
-                   const VarOrRVar &tx, const VarOrRVar &ty, const VarOrRVar &tz,
-                   const Expr &x_size, const Expr &y_size, const Expr &z_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
-    Func &gpu_tile(const VarOrRVar &x, const VarOrRVar &y, const VarOrRVar &z,
-                   const VarOrRVar &tx, const VarOrRVar &ty, const VarOrRVar &tz,
-                   const Expr &x_size, const Expr &y_size, const Expr &z_size,
-                   TailStrategy tail = TailStrategy::Auto,
-                   DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                          VarOrRVar bx, VarOrRVar by, VarOrRVar bz,
+                          VarOrRVar tx, VarOrRVar ty, VarOrRVar tz,
+                          int x_size, int y_size, int z_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                          VarOrRVar tx, VarOrRVar ty, VarOrRVar tz,
+                          int x_size, int y_size, int z_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+
+    // Will be deprecated.
+    EXPORT Func &gpu_tile(VarOrRVar x, int x_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y, int x_size, int y_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
+    EXPORT Func &gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
+                          int x_size, int y_size, int z_size,
+                          TailStrategy tail = TailStrategy::Auto,
+                          DeviceAPI device_api = DeviceAPI::Default_GPU);
     // @}
+
+    /** Schedule for execution using coordinate-based hardware api.
+     * GLSL is an example of this. Conceptually, this is
+     * similar to parallelization over 'x' and 'y' (since GLSL shaders compute
+     * individual output pixels in parallel) and vectorization over 'c'
+     * (since GLSL/RS implicitly vectorizes the color channel). */
+    EXPORT Func &shader(Var x, Var y, Var c, DeviceAPI device_api);
+
+    /** Schedule for execution as GLSL kernel. */
+    EXPORT Func &glsl(Var x, Var y, Var c);
 
     /** Schedule for execution on Hexagon. When a loop is marked with
      * Hexagon, that loop is executed on a Hexagon DSP. */
-    Func &hexagon(const VarOrRVar &x = Var::outermost());
+    EXPORT Func &hexagon(VarOrRVar x = Var::outermost());
 
     /** Prefetch data written to or read from a Func or an ImageParam by a
-     * subsequent loop iteration, at an optionally specified iteration offset. You may specify
-     * specification of different vars for the location of the prefetch() instruction
-     * vs. the location that is being prefetched:
-     *
-     * - the first var specified, 'at', indicates the loop in which the prefetch will be placed
-     * - the second var specified, 'from', determines the var used to find the bounds to prefetch
-     *   (in conjunction with 'offset')
-     *
-     * If 'at' and 'from' are distinct vars, then 'from' must be at a nesting level outside 'at.'
-     * Note that the value for 'offset' applies only to 'from', not 'at'.
-     *
+     * subsequent loop iteration, at an optionally specified iteration offset.
+     * 'var' specifies at which loop level the prefetch calls should be inserted.
      * The final argument specifies how prefetch of region outside bounds
      * should be handled.
      *
      * For example, consider this pipeline:
      \code
      Func f, g;
-     Var x, y, z;
+     Var x, y;
      f(x, y) = x + y;
      g(x, y) = 2 * f(x, y);
-     h(x, y) = 3 * f(x, y);
      \endcode
      *
      * The following schedule:
      \code
      f.compute_root();
-     g.prefetch(f, x, x, 2, PrefetchBoundStrategy::NonFaulting);
-     h.prefetch(f, x, y, 2, PrefetchBoundStrategy::NonFaulting);
+     g.prefetch(f, x, 2, PrefetchBoundStrategy::NonFaulting);
      \endcode
      *
-     * will inject prefetch call at the innermost loop of 'g' and 'h' and generate
+     * will inject prefetch call at the innermost loop of 'g' and generate
      * the following loop nest:
-     \code
-     for y = ...
-       for x = ...
-         f(x, y) = x + y
-     for y = ..
-       for x = ...
-         prefetch(&f[x + 2, y], 1, 16);
-         g(x, y) = 2 * f(x, y)
-     for y = ..
-       for x = ...
-         prefetch(&f[x, y + 2], 1, 16);
-         h(x, y) = 3 * f(x, y)
-     \endcode
-     *
-     * Note that the 'from' nesting level need not be adjacent to 'at':
-     \code
-     Func f, g;
-     Var x, y, z, w;
-     f(x, y, z, w) = x + y + z + w;
-     g(x, y, z, w) = 2 * f(x, y, z, w);
-     \endcode
-     *
-     * The following schedule:
-     \code
-     f.compute_root();
-     g.prefetch(f, y, w, 2, PrefetchBoundStrategy::NonFaulting);
-     \endcode
-     *
-     * will produce code that prefetches a tile of data:
-     \code
-     for w = ...
-       for z = ...
-         for y = ...
-           for x = ...
-         f(x, y, z, w) = x + y + z + w
-     for w = ...
-       for z = ...
-         for y = ...
-           for x0 = ...
-              prefetch(&f[x0, y, z, w + 2], 1, 16);
-           for x = ...
-             g(x, y, z, w) = 2 * f(x, y, z, w)
-     \endcode
-     *
-     * Note that calling prefetch() with the same var for both 'at' and 'from'
-     * is equivalent to calling prefetch() with that var.
+     * for y = ...
+     *   for x = ...
+     *     f(x, y) = x + y
+     * for y = ..
+     *   for x = ...
+     *     prefetch(&f[x + 2, y], 1, 16);
+     *     g(x, y) = 2 * f(x, y)
      */
     // @{
-    Func &prefetch(const Func &f, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
-                   PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
-    Func &prefetch(const Internal::Parameter &param, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
-                   PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
+    EXPORT Func &prefetch(const Func &f, VarOrRVar var, Expr offset = 1,
+                          PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
+    EXPORT Func &prefetch(const Internal::Parameter &param, VarOrRVar var, Expr offset = 1,
+                          PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf);
     template<typename T>
-    Func &prefetch(const T &image, const VarOrRVar &at, const VarOrRVar &from, Expr offset = 1,
+    Func &prefetch(const T &image, VarOrRVar var, Expr offset = 1,
                    PrefetchBoundStrategy strategy = PrefetchBoundStrategy::GuardWithIf) {
-        return prefetch(image.parameter(), at, from, std::move(offset), strategy);
+        return prefetch(image.parameter(), var, offset, strategy);
     }
     // @}
 
@@ -2006,12 +1594,12 @@ public:
      * positions in the nesting order while the specified variables
      * are reordered around them. */
     // @{
-    Func &reorder_storage(const std::vector<Var> &dims);
+    EXPORT Func &reorder_storage(const std::vector<Var> &dims);
 
-    Func &reorder_storage(const Var &x, const Var &y);
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE typename std::enable_if<Internal::all_are_convertible<Var, Args...>::value, Func &>::type
-    reorder_storage(const Var &x, const Var &y, Args &&...args) {
+    EXPORT Func &reorder_storage(Var x, Var y);
+    template <typename... Args>
+    NO_INLINE typename std::enable_if<Internal::all_are_convertible<Var, Args...>::value, Func &>::type
+    reorder_storage(Var x, Var y, Args&&... args) {
         std::vector<Var> collected_args{x, y, std::forward<Args>(args)...};
         return reorder_storage(collected_args);
     }
@@ -2027,7 +1615,7 @@ public:
      * For example, to guarantee that a function foo(x, y, c)
      * representing an image has scanlines starting on offsets
      * aligned to multiples of 16, use foo.align_storage(x, 16). */
-    Func &align_storage(const Var &dim, const Expr &alignment);
+    EXPORT Func &align_storage(Var dim, Expr alignment);
 
     /** Store realizations of this function in a circular buffer of a
      * given extent. This is more efficient when the extent of the
@@ -2059,7 +1647,7 @@ public:
      * with an extent in y of 2, alternately storing each computed row
      * of g in row y=0 or y=1.
      */
-    Func &fold_storage(const Var &dim, const Expr &extent, bool fold_forward = true);
+    EXPORT Func &fold_storage(Var dim, Expr extent, bool fold_forward = true);
 
     /** Compute this function as needed for each unique value of the
      * given var for the given calling function f.
@@ -2130,25 +1718,16 @@ public:
      * as good, and we have to allocate more temporary memory to store
      * g.
      */
-    Func &compute_at(const Func &f, const Var &var);
+    EXPORT Func &compute_at(Func f, Var var);
 
     /** Schedule a function to be computed within the iteration over
      * some dimension of an update domain. Produces equivalent code
      * to the version of compute_at that takes a Var. */
-    Func &compute_at(const Func &f, const RVar &var);
+    EXPORT Func &compute_at(Func f, RVar var);
 
     /** Schedule a function to be computed within the iteration over
      * a given LoopLevel. */
-    Func &compute_at(LoopLevel loop_level);
-
-    /** Schedule the iteration over the initial definition of this function
-     *  to be fused with another stage 's' from outermost loop to a
-     * given LoopLevel. */
-    // @{
-    Func &compute_with(const Stage &s, const VarOrRVar &var, const std::vector<std::pair<VarOrRVar, LoopAlignStrategy>> &align);
-    Func &compute_with(const Stage &s, const VarOrRVar &var, LoopAlignStrategy align = LoopAlignStrategy::Auto);
-    Func &compute_with(LoopLevel loop_level, const std::vector<std::pair<VarOrRVar, LoopAlignStrategy>> &align);
-    Func &compute_with(LoopLevel loop_level, LoopAlignStrategy align = LoopAlignStrategy::Auto);
+    EXPORT Func &compute_at(LoopLevel loop_level);
 
     /** Compute all of this function once ahead of time. Reusing
      * the example in \ref Func::compute_at :
@@ -2185,47 +1764,14 @@ public:
      * probably not still in cache when they are used by f), and
      * allocates lots of temporary memory to store g.
      */
-    Func &compute_root();
+    EXPORT Func &compute_root();
 
     /** Use the halide_memoization_cache_... interface to store a
      *  computed version of this function across invocations of the
      *  Func.
-     *
-     * If an eviction_key is provided, it must be constructed with
-     * Expr of integer or handle type. The key Expr will be promoted
-     * to a uint64_t and can be used with halide_memoization_cache_evict
-     * to remove memoized entries using this eviction key from the
-     * cache. Memoized computations that do not provide an eviction
-     * key will never be evicted by this mechanism.
      */
-    Func &memoize(const EvictionKey &eviction_key = EvictionKey());
+    EXPORT Func &memoize();
 
-    /** Produce this Func asynchronously in a separate
-     * thread. Consumers will be run by the task system when the
-     * production is complete. If this Func's store level is different
-     * to its compute level, consumers will be run concurrently,
-     * blocking as necessary to prevent reading ahead of what the
-     * producer has computed. If storage is folded, then the producer
-     * will additionally not be permitted to run too far ahead of the
-     * consumer, to avoid clobbering data that has not yet been
-     * used.
-     *
-     * Take special care when combining this with custom thread pool
-     * implementations, as avoiding deadlock with producer-consumer
-     * parallelism requires a much more sophisticated parallel runtime
-     * than with data parallelism alone. It is strongly recommended
-     * you just use Halide's default thread pool, which guarantees no
-     * deadlock and a bound on the number of threads launched.
-     */
-    Func &async();
-
-    /** Bound the extent of a Func's storage, but not extent of its
-     * compute. This can be useful for forcing a function's allocation
-     * to be a fixed size, which often means it can go on the stack.
-     * If bounds inference decides that it requires more storage for
-     * this function than the allocation size you have stated, a runtime
-     * error will occur when you try to run the pipeline. */
-    Func &bound_storage(const Var &dim, const Expr &bound);
 
     /** Allocate storage for this function within f's loop over
      * var. Scheduling storage is optional, and can be used to
@@ -2320,20 +1866,21 @@ public:
      * of pulling new memory into cache.
      *
      */
-    Func &store_at(const Func &f, const Var &var);
+    EXPORT Func &store_at(Func f, Var var);
 
     /** Equivalent to the version of store_at that takes a Var, but
      * schedules storage within the loop over a dimension of a
      * reduction domain */
-    Func &store_at(const Func &f, const RVar &var);
+    EXPORT Func &store_at(Func f, RVar var);
+
 
     /** Equivalent to the version of store_at that takes a Var, but
      * schedules storage at a given LoopLevel. */
-    Func &store_at(LoopLevel loop_level);
+    EXPORT Func &store_at(LoopLevel loop_level);
 
     /** Equivalent to \ref Func::store_at, but schedules storage
      * outside the outermost loop. */
-    Func &store_root();
+    EXPORT Func &store_root();
 
     /** Aggressively inline all uses of this function. This is the
      * default schedule, so you're unlikely to need to call this. For
@@ -2360,38 +1907,25 @@ public:
      }
      \endcode
      */
-    Func &compute_inline();
+    EXPORT Func &compute_inline();
 
     /** Get a handle on an update step for the purposes of scheduling
      * it. */
-    Stage update(int idx = 0);
-
-    /** Set the type of memory this Func should be stored in. Controls
-     * whether allocations go on the stack or the heap on the CPU, and
-     * in global vs shared vs local on the GPU. See the documentation
-     * on MemoryType for more detail. */
-    Func &store_in(MemoryType memory_type);
+    EXPORT Stage update(int idx = 0);
 
     /** Trace all loads from this Func by emitting calls to
      * halide_trace. If the Func is inlined, this has no
      * effect. */
-    Func &trace_loads();
+    EXPORT Func &trace_loads();
 
     /** Trace all stores to the buffer backing this Func by emitting
      * calls to halide_trace. If the Func is inlined, this call
      * has no effect. */
-    Func &trace_stores();
+    EXPORT Func &trace_stores();
 
     /** Trace all realizations of this Func by emitting calls to
      * halide_trace. */
-    Func &trace_realizations();
-
-    /** Add a string of arbitrary text that will be passed thru to trace
-     * inspection code if the Func is realized in trace mode. (Funcs that are
-     * inlined won't have their tags emitted.) Ignored entirely if
-     * tracing is not enabled for the Func (or globally).
-     */
-    Func &add_trace_tag(const std::string &trace_tag);
+    EXPORT Func &trace_realizations();
 
     /** Get a handle on the internal halide function that this Func
      * represents. Useful if you want to do introspection on Halide
@@ -2408,12 +1942,14 @@ public:
      * if this is the output Func in a pipeline. Useful for making
      * static promises about strides, mins, and extents. */
     // @{
-    OutputImageParam output_buffer() const;
-    std::vector<OutputImageParam> output_buffers() const;
+    EXPORT OutputImageParam output_buffer() const;
+    EXPORT std::vector<OutputImageParam> output_buffers() const;
     // @}
 
     /** Use a Func as an argument to an external stage. */
-    operator ExternFuncArgument() const;
+    operator ExternFuncArgument() const {
+        return ExternFuncArgument(func);
+    }
 
     /** Infer the arguments to the Func, sorted into a canonical order:
      * all buffers (sorted alphabetically by name), followed by all non-buffers
@@ -2423,23 +1959,12 @@ public:
      func.compile_to_assembly("/dev/stdout", func.infer_arguments());
      \endcode
      */
-    std::vector<Argument> infer_arguments() const;
-
-    /** Get the source location of the pure definition of this
-     * Func. See Stage::source_location() */
-    std::string source_location() const;
-
-    /** Return the current StageSchedule associated with this initial
-     * Stage of this Func. For introspection only: to modify schedule,
-     * use the Func interface. */
-    const Internal::StageSchedule &get_schedule() const {
-        return Stage(*this).get_schedule();
-    }
+    EXPORT std::vector<Argument> infer_arguments() const;
 };
 
 namespace Internal {
 
-template<typename Last>
+template <typename Last>
 inline void check_types(const Tuple &t, int idx) {
     using T = typename std::remove_pointer<typename std::remove_reference<Last>::type>::type;
     user_assert(t[idx].type() == type_of<T>())
@@ -2448,22 +1973,22 @@ inline void check_types(const Tuple &t, int idx) {
         << " as a scalar of type " << type_of<T>() << "\n";
 }
 
-template<typename First, typename Second, typename... Rest>
+template <typename First, typename Second, typename... Rest>
 inline void check_types(const Tuple &t, int idx) {
     check_types<First>(t, idx);
-    check_types<Second, Rest...>(t, idx + 1);
+    check_types<Second, Rest...>(t, idx+1);
 }
 
-template<typename Last>
+template <typename Last>
 inline void assign_results(Realization &r, int idx, Last last) {
     using T = typename std::remove_pointer<typename std::remove_reference<Last>::type>::type;
     *last = Buffer<T>(r[idx])();
 }
 
-template<typename First, typename Second, typename... Rest>
-inline void assign_results(Realization &r, int idx, First first, Second second, Rest &&...rest) {
+template <typename First, typename Second, typename... Rest>
+inline void assign_results(Realization &r, int idx, First first, Second second, Rest&&... rest) {
     assign_results<First>(r, idx, first);
-    assign_results<Second, Rest...>(r, idx + 1, second, rest...);
+    assign_results<Second, Rest...>(r, idx+1, second, rest...);
 }
 
 }  // namespace Internal
@@ -2472,39 +1997,28 @@ inline void assign_results(Realization &r, int idx, First first, Second second, 
  * expression. This can be thought of as a scalar version of
  * \ref Func::realize */
 template<typename T>
-HALIDE_NO_USER_CODE_INLINE T evaluate(JITUserContext *ctx, const Expr &e) {
+NO_INLINE T evaluate(Expr e) {
     user_assert(e.type() == type_of<T>())
         << "Can't evaluate expression "
         << e << " of type " << e.type()
         << " as a scalar of type " << type_of<T>() << "\n";
     Func f;
     f() = e;
-    Buffer<T, 0> im = f.realize(ctx);
+    Buffer<T> im = f.realize();
     return im();
 }
 
-/** evaluate with a default user context */
-template<typename T>
-HALIDE_NO_USER_CODE_INLINE T evaluate(const Expr &e) {
-    return evaluate<T>(nullptr, e);
-}
-
 /** JIT-compile and run enough code to evaluate a Halide Tuple. */
-template<typename First, typename... Rest>
-HALIDE_NO_USER_CODE_INLINE void evaluate(JITUserContext *ctx, Tuple t, First first, Rest &&...rest) {
+template <typename First, typename... Rest>
+NO_INLINE void evaluate(Tuple t, First first, Rest&&... rest) {
     Internal::check_types<First, Rest...>(t, 0);
 
     Func f;
     f() = t;
-    Realization r = f.realize(ctx);
+    Realization r = f.realize();
     Internal::assign_results(r, 0, first, rest...);
 }
 
-/** JIT-compile and run enough code to evaluate a Halide Tuple. */
-template<typename First, typename... Rest>
-HALIDE_NO_USER_CODE_INLINE void evaluate(Tuple t, First first, Rest &&...rest) {
-    evaluate<First, Rest...>(nullptr, std::move(t), std::forward<First>(first), std::forward<Rest...>(rest...));
-}
 
 namespace Internal {
 
@@ -2513,7 +2027,7 @@ inline void schedule_scalar(Func f) {
     if (t.has_gpu_feature()) {
         f.gpu_single_thread();
     }
-    if (t.has_feature(Target::HVX)) {
+    if (t.has_feature(Target::HVX_64) || t.has_feature(Target::HVX_128)) {
         f.hexagon();
     }
 }
@@ -2526,7 +2040,7 @@ inline void schedule_scalar(Func f) {
  * specifies one.
  */
 template<typename T>
-HALIDE_NO_USER_CODE_INLINE T evaluate_may_gpu(const Expr &e) {
+NO_INLINE T evaluate_may_gpu(Expr e) {
     user_assert(e.type() == type_of<T>())
         << "Can't evaluate expression "
         << e << " of type " << e.type()
@@ -2534,15 +2048,15 @@ HALIDE_NO_USER_CODE_INLINE T evaluate_may_gpu(const Expr &e) {
     Func f;
     f() = e;
     Internal::schedule_scalar(f);
-    Buffer<T, 0> im = f.realize();
+    Buffer<T> im = f.realize();
     return im();
 }
 
 /** JIT-compile and run enough code to evaluate a Halide Tuple. Can
  *  use GPU if jit target from environment specifies one. */
 // @{
-template<typename First, typename... Rest>
-HALIDE_NO_USER_CODE_INLINE void evaluate_may_gpu(Tuple t, First first, Rest &&...rest) {
+template <typename First, typename... Rest>
+NO_INLINE void evaluate_may_gpu(Tuple t, First first, Rest&&... rest) {
     Internal::check_types<First, Rest...>(t, 0);
 
     Func f;
@@ -2553,6 +2067,7 @@ HALIDE_NO_USER_CODE_INLINE void evaluate_may_gpu(Tuple t, First first, Rest &&..
 }
 // @}
 
-}  // namespace Halide
+}
+
 
 #endif

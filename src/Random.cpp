@@ -1,13 +1,12 @@
 #include "Random.h"
-#include "Func.h"
-#include "IRMutator.h"
 #include "IROperator.h"
+#include "IRMutator.h"
 
 namespace Halide {
 namespace Internal {
 
-using std::string;
 using std::vector;
+using std::string;
 
 namespace {
 
@@ -18,7 +17,7 @@ namespace {
 
 // Permute a 32-bit unsigned integer using a fixed psuedorandom
 // permutation.
-Expr rng32(const Expr &x) {
+Expr rng32(Expr x) {
     internal_assert(x.type() == UInt(32));
 
     // A polynomial P with coefficients C0 .. CN induces a permutation
@@ -61,10 +60,11 @@ Expr rng32(const Expr &x) {
 
     return (((C2 * x) + C1) * x) + C0;
 }
-}  // namespace
+
+}
 
 Expr random_int(const vector<Expr> &e) {
-    internal_assert(!e.empty());
+    internal_assert(e.size());
     internal_assert(e[0].type() == Int(32) || e[0].type() == UInt(32));
     // Permute the first term
     Expr result = rng32(cast(UInt(32), e[0]));
@@ -82,10 +82,6 @@ Expr random_int(const vector<Expr> &e) {
                                rng32(Variable::make(UInt(32), name)));
         }
     }
-    // The low bytes of this have a poor period, so mix in the high bytes for
-    // two additional instructions.
-    result = result ^ (result >> 16);
-
     return result;
 }
 
@@ -97,53 +93,42 @@ Expr random_float(const vector<Expr> &e) {
     return clamp(reinterpret(Float(32), result) - 1.0f, 0.0f, 1.0f);
 }
 
-namespace {
-
 class LowerRandom : public IRMutator {
     using IRMutator::visit;
 
-    Expr visit(const Call *op) override {
+    void visit(const Call *op) {
         if (op->is_intrinsic(Call::random)) {
             vector<Expr> args = op->args;
-            // Insert the free vars in reverse, so innermost vars typically end
-            // up last.
-            args.insert(args.end(), extra_args.rbegin(), extra_args.rend());
+            args.insert(args.end(), extra_args.begin(), extra_args.end());
             if (op->type == Float(32)) {
-                return random_float(args);
+                expr = random_float(args);
             } else if (op->type == Int(32)) {
-                return cast<int32_t>(random_int(args));
+                expr = cast<int32_t>(random_int(args));
             } else if (op->type == UInt(32)) {
-                return random_int(args);
+                expr = random_int(args);
             } else {
                 internal_error << "The intrinsic random() returns an Int(32), UInt(32) or a Float(32).\n";
-                return Expr();
             }
         } else {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         }
     }
 
     vector<Expr> extra_args;
-
 public:
-    LowerRandom(const vector<VarOrRVar> &free_vars, int tag) {
-        for (const VarOrRVar &v : free_vars) {
-            if (v.is_rvar) {
-                extra_args.push_back(v.rvar);
-            } else {
-                extra_args.push_back(v.var);
-            }
+    LowerRandom(const vector<string> &free_vars, int tag) {
+        extra_args.push_back(tag);
+        for (size_t i = 0; i < free_vars.size(); i++) {
+            internal_assert(!free_vars[i].empty());
+            extra_args.push_back(Variable::make(Int(32), free_vars[i]));
         }
-        extra_args.emplace_back(tag);
     }
 };
 
-}  // namespace
-
-Expr lower_random(const Expr &e, const vector<VarOrRVar> &free_vars, int tag) {
+Expr lower_random(Expr e, const vector<string> &free_vars, int tag) {
     LowerRandom r(free_vars, tag);
     return r.mutate(e);
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

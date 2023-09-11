@@ -7,18 +7,12 @@
  */
 
 #include <map>
-#include <string>
-#include <vector>
 
-#include "Expr.h"
+#include "IR.h"
+#include "Target.h"
 
 namespace Halide {
-
-struct Target;
-
 namespace Internal {
-
-class Function;
 
 /** Take a statement with multi-dimensional Realize, Provide, and Call
  * nodes, and turn it into a statement with single-dimensional
@@ -28,7 +22,7 @@ Stmt storage_flattening(Stmt s,
                         const std::map<std::string, Function> &env,
                         const Target &target);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

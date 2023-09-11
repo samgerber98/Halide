@@ -1,13 +1,13 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "HalideBuffer.h"
 #include "embed_image.h"
+#include "HalideBuffer.h"
 
 using namespace Halide::Runtime;
 
 int main(int argc, char **argv) {
-    Buffer<float, 3> input(10, 10, 3);
+    Buffer<float> input(10, 10, 3);
     for (int y = 0; y < 10; y++) {
         for (int x = 0; x < 10; x++) {
             input(x, y, 0) = sinf((float)(x * y + 1));
@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
             input(x, y, 2) = sqrtf((float)(x * x + y * y));
         }
     }
-    Buffer<float, 3> output(10, 10, 3);
+    Buffer<float> output(10, 10, 3);
 
     embed_image(input, output);
 

@@ -8,10 +8,8 @@
  */
 
 #include <map>
-#include <string>
-#include <vector>
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 
@@ -25,12 +23,13 @@ class Function;
  * appropriate places using the schedule. Returns a flag indicating
  * whether memoization passes need to be run. */
 Stmt schedule_functions(const std::vector<Function> &outputs,
-                        const std::vector<std::vector<std::string>> &fused_groups,
+                        const std::vector<std::string> &order,
                         const std::map<std::string, Function> &env,
                         const Target &target,
                         bool &any_memoized);
 
-}  // namespace Internal
-}  // namespace Halide
+
+}
+}
 
 #endif

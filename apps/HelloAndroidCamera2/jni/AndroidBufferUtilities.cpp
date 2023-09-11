@@ -19,7 +19,7 @@ jlong JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUtilities_allocN
     jobject srcChromaUByteBuffer, jobject srcChromaVByteBuffer,
     jint srcChromaElementStrideBytes, jint srcChromaRowStrideBytes) {
     uint8_t *srcLumaPtr = reinterpret_cast<uint8_t *>(
-        env->GetDirectBufferAddress(srcLumaByteBuffer));
+            env->GetDirectBufferAddress(srcLumaByteBuffer));
     uint8_t *srcChromaUPtr = reinterpret_cast<uint8_t *>(
         env->GetDirectBufferAddress(srcChromaUByteBuffer));
     uint8_t *srcChromaVPtr = reinterpret_cast<uint8_t *>(
@@ -30,11 +30,11 @@ jlong JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUtilities_allocN
     }
 
     YuvBufferT *buffer = new YuvBufferT(srcLumaPtr, srcWidth, srcHeight,
-                                        1 /* srcLumaElementStrideBytes */, srcLumaRowStrideBytes,
-                                        srcChromaUPtr, srcWidth / 2, srcHeight / 2,
-                                        srcChromaElementStrideBytes, srcChromaRowStrideBytes,
-                                        srcChromaVPtr, srcWidth / 2, srcHeight / 2,
-                                        srcChromaElementStrideBytes, srcChromaRowStrideBytes);
+        1 /* srcLumaElementStrideBytes */, srcLumaRowStrideBytes,
+        srcChromaUPtr, srcWidth / 2, srcHeight / 2,
+        srcChromaElementStrideBytes, srcChromaRowStrideBytes,
+        srcChromaVPtr, srcWidth / 2, srcHeight / 2,
+        srcChromaElementStrideBytes, srcChromaRowStrideBytes);
     return reinterpret_cast<jlong>(buffer);
 }
 
@@ -49,16 +49,16 @@ JNIEXPORT jboolean JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUti
 }
 
 JNIEXPORT
-jboolean JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUtilities_rotateNativeYuvBufferT180(
+jboolean JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUtilities_rotateNativeYuvBufferT180(    
     JNIEnv *env, jobject obj, jlong handle) {
     if (handle == 0L) {
         return false;
     }
     YuvBufferT *yuvBufferT = reinterpret_cast<YuvBufferT *>(handle);
     yuvBufferT->rotate180();
-    return true;
+    return true;    
 }
-
+    
 JNIEXPORT jlong JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUtilities_lockSurface(
     JNIEnv *env, jobject obj, jobject surface) {
     return reinterpret_cast<jlong>(LockedSurface::lock(env, surface));
@@ -88,4 +88,4 @@ JNIEXPORT jboolean JNICALL Java_com_example_helloandroidcamera2_AndroidBufferUti
     return true;
 }
 
-}  // extern "C"
+} // extern "C"

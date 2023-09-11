@@ -1,12 +1,7 @@
 #ifndef HALIDE_HALIDERUNTIMEOPENCL_H
 #define HALIDE_HALIDERUNTIMEOPENCL_H
 
-// Don't include HalideRuntime.h if the contents of it were already pasted into a generated header above this one
-#ifndef HALIDE_HALIDERUNTIME_H
-
 #include "HalideRuntime.h"
-
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,16 +11,13 @@ extern "C" {
  *  Routines specific to the Halide OpenCL runtime.
  */
 
-#define HALIDE_RUNTIME_OPENCL
-
 extern const struct halide_device_interface_t *halide_opencl_device_interface();
-extern const struct halide_device_interface_t *halide_opencl_image_device_interface();
 
 /** These are forward declared here to allow clients to override the
  *  Halide OpenCL runtime. Do not call them. */
 // @{
 extern int halide_opencl_initialize_kernels(void *user_context, void **state_ptr,
-                                            const char *src, int size);
+                                               const char *src, int size);
 extern int halide_opencl_run(void *user_context,
                              void *state_ptr,
                              const char *entry_name,
@@ -34,8 +26,11 @@ extern int halide_opencl_run(void *user_context,
                              int shared_mem_bytes,
                              size_t arg_sizes[],
                              void *args[],
-                             int8_t arg_is_buffer[]);
-extern void halide_opencl_finalize_kernels(void *user_context, void *state_ptr);
+                             int8_t arg_is_buffer[],
+                             int num_attributes,
+                             float* vertex_buffer,
+                             int num_coords_dim0,
+                             int num_coords_dim1);
 // @}
 
 /** Set the platform name for OpenCL to use (e.g. "Intel" or
@@ -66,54 +61,34 @@ extern void halide_opencl_set_device_type(const char *n);
  * halide_set_ocl_device_type. */
 extern const char *halide_opencl_get_device_type(void *user_context);
 
-/** Set the additional build options for OpenCL to use. The argument
- * is copied internally. If never called,
- * Halide uses the environment variable HL_OCL_BUILD_OPTIONS. */
-extern void halide_opencl_set_build_options(const char *n);
-
-/** Halide calls this to gets the additional build options for OpenCL to
- * use. Implement this yourself to use a different build options per
- * user_context. The default implementation returns the value set by
- * halide_opencl_set_build_options, or the environment variable
- * HL_OCL_BUILD_OPTIONS. The result is valid until the next call to
- * halide_opencl_set_build_options. */
-extern const char *halide_opencl_get_build_options(void *user_context);
-
-/** Set the underlying cl_mem for a halide_buffer_t. This memory should be
+/** Set the underlying cl_mem for a buffer_t. This memory should be
  * allocated using clCreateBuffer or similar and must have an extent
- * large enough to cover that specified by the halide_buffer_t extent
- * fields. The dev field of the halide_buffer_t must be NULL when this
+ * large enough to cover that specified by the buffer_t extent
+ * fields. The dev field of the buffer_t must be NULL when this
  * routine is called. This call can fail due to running out of memory
  * or being passed an invalid device pointer. The device and host
  * dirty bits are left unmodified. */
-extern int halide_opencl_wrap_cl_mem(void *user_context, struct halide_buffer_t *buf, uint64_t device_ptr);
+extern int halide_opencl_wrap_cl_mem(void *user_context, struct buffer_t *buf, uintptr_t device_ptr);
 
-/** Same as halide_opencl_wrap_cl_mem but wraps a cl_mem created with
- * clCreateImage
- */
-extern int halide_opencl_image_wrap_cl_mem(void *user_context, struct halide_buffer_t *buf, uint64_t device_ptr);
-
-/** Disconnect a halide_buffer_t from the memory it was previously
- * wrapped around. Should only be called for a halide_buffer_t that
+/** Disconnect a buffer_t from the memory it was previously wrapped
+ * around. Should only be called for a buffer_t that
  * halide_opencl_wrap_device_ptr was previously called on. Frees any
- * storage associated with the binding of the halide_buffer_t and the
- * device pointer, but does not free the cl_mem. The dev field of the
- * halide_buffer_t will be NULL on return.
+ * storage associated with the binding of the buffer_t and the device
+ * pointer, but does not free the cl_mem. The previously wrapped
+ * cl_mem is returned. The dev field of the buffer_t will be NULL on
+ * return.
  */
-extern int halide_opencl_detach_cl_mem(void *user_context, struct halide_buffer_t *buf);
+extern uintptr_t halide_opencl_detach_cl_mem(void *user_context, struct buffer_t *buf);
 
-/** Return the underlying cl_mem for a halide_buffer_t. This buffer must be
+/** Return the underlying cl_mem for a buffer_t. This buffer must be
  *  valid on an OpenCL device, or not have any associated device
  *  memory. If there is no device memory (dev field is NULL), this
  *  returns 0.
  */
-extern uintptr_t halide_opencl_get_cl_mem(void *user_context, struct halide_buffer_t *buf);
-
-/** Returns the offset associated with the OpenCL memory allocation via device_crop or device_slice. */
-extern uint64_t halide_opencl_get_crop_offset(void *user_context, halide_buffer_t *buf);
+extern uintptr_t halide_opencl_get_cl_mem(void *user_context, struct buffer_t *buf);
 
 #ifdef __cplusplus
-}  // End extern "C"
+} // End extern "C"
 #endif
 
-#endif  // HALIDE_HALIDERUNTIMEOPENCL_H
+#endif // HALIDE_HALIDERUNTIMEOPENCL_H

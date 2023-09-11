@@ -6,16 +6,16 @@
  * which they actually do something.
  */
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
 
 /** Truncate loop bounds to the region over which they actually do
  * something. For examples see test/correctness/trim_no_ops.cpp */
-Stmt trim_no_ops(Stmt s);
+EXPORT Stmt trim_no_ops(Stmt s);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

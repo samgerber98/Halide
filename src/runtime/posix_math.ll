@@ -1,6 +1,5 @@
 declare float @llvm.sqrt.f32(float) nounwind readnone
 declare double @llvm.sqrt.f64(double) nounwind readnone
-declare half @llvm.sqrt.f16(half) nounwind readnone
 
 define weak_odr float @sqrt_f32(float %x) nounwind uwtable readnone alwaysinline {
        %y = tail call float @llvm.sqrt.f32(float %x) nounwind readnone
@@ -10,11 +9,6 @@ define weak_odr float @sqrt_f32(float %x) nounwind uwtable readnone alwaysinline
 define weak_odr double @sqrt_f64(double %x) nounwind uwtable readnone alwaysinline {
        %y = tail call double @llvm.sqrt.f64(double %x) nounwind readnone
        ret double %y
-}
-
-define weak_odr half @sqrt_f16(half %x) nounwind uwtable readnone alwaysinline {
-       %y = tail call half @llvm.sqrt.f16(half %x) nounwind readnone
-       ret half %y
 }
 
 declare float @llvm.sin.f32(float) nounwind readnone
@@ -84,7 +78,6 @@ define weak_odr double @abs_f64(double %x) nounwind uwtable readnone alwaysinlin
 
 declare float @llvm.floor.f32(float) nounwind readnone
 declare double @llvm.floor.f64(double) nounwind readnone
-declare half @llvm.floor.f16(half) nounwind readnone
 
 define weak_odr float @floor_f32(float %x) nounwind uwtable readnone alwaysinline {
        %y = tail call float @llvm.floor.f32(float %x) nounwind readnone
@@ -96,17 +89,11 @@ define weak_odr double @floor_f64(double %x) nounwind uwtable readnone alwaysinl
        ret double %y
 }
 
-define weak_odr half @floor_f16(half %x) nounwind uwtable readnone alwaysinline {
-       %y = tail call half @llvm.floor.f16(half %x) nounwind readnone
-       ret half %y
-}
-
 ; These are llvm 3.3 only
 ; declare float @llvm.ceil.f32(float) nounwind readnone
 ; declare double @llvm.ceil.f64(double) nounwind readnone
 declare float @ceilf(float) nounwind readnone
 declare double @ceil(double) nounwind readnone
-declare half @llvm.ceil.f16(half) nounwind readnone
 
 define weak_odr float @ceil_f32(float %x) nounwind uwtable readnone alwaysinline {
        %y = tail call float @ceilf(float %x) nounwind readnone
@@ -118,14 +105,21 @@ define weak_odr double @ceil_f64(double %x) nounwind uwtable readnone alwaysinli
        ret double %y
 }
 
-define weak_odr half @ceil_f16(half %x) nounwind uwtable readnone alwaysinline {
-       %y = tail call half @llvm.ceil.f16(half %x) nounwind readnone
-       ret half %y
+declare float @llvm.nearbyint.f32(float) nounwind readnone
+declare double @llvm.nearbyint.f64(double) nounwind readnone
+
+define weak_odr float @round_f32(float %x) nounwind uwtable readnone alwaysinline {
+       %y = tail call float @llvm.nearbyint.f32(float %x) nounwind readnone
+       ret float %y
+}
+
+define weak_odr double @round_f64(double %x) nounwind uwtable readnone alwaysinline {
+       %y = tail call double @llvm.nearbyint.f64(double %x) nounwind readnone
+       ret double %y
 }
 
 declare float @llvm.trunc.f32(float) nounwind readnone
 declare double @llvm.trunc.f64(double) nounwind readnone
-declare half @llvm.trunc.f16(half) nounwind readnone
 
 define weak_odr float @trunc_f32(float %x) nounwind uwtable readnone alwaysinline {
        %y = tail call float @llvm.trunc.f32(float %x) nounwind readnone
@@ -135,11 +129,6 @@ define weak_odr float @trunc_f32(float %x) nounwind uwtable readnone alwaysinlin
 define weak_odr double @trunc_f64(double %x) nounwind uwtable readnone alwaysinline {
        %y = tail call double @llvm.trunc.f64(double %x) nounwind readnone
        ret double %y
-}
-
-define weak_odr half @trunc_f16(half %x) nounwind uwtable readnone alwaysinline {
-       %y = tail call half @llvm.trunc.f16(half %x) nounwind readnone
-       ret half %y
 }
 
 declare float @llvm.pow.f32(float, float) nounwind readnone

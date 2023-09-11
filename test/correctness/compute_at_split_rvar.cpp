@@ -3,8 +3,14 @@
 
 using namespace Halide;
 
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 int call_counter = 0;
-extern "C" HALIDE_EXPORT_SYMBOL int count(int x) {
+extern "C" DLLEXPORT int count(int x) {
     return call_counter++;
 }
 HalideExtern_1(int, count, int);
@@ -24,17 +30,12 @@ int main(int argc, char **argv) {
         g.update().split(r, ro, ri, 2);
         f.compute_at(g, ri);
 
-        Buffer<int> im = g.realize({10});
-
-        if (call_counter != 10) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
+        Buffer<int> im = g.realize(10);
 
         for (int i = 0; i < im.width(); i++) {
             if (im(i) != i) {
                 printf("im(%d) = %d instead of %d\n", i, im(i), i);
-                return 1;
+                return -1;
             }
         }
         call_counter = 0;
@@ -53,17 +54,12 @@ int main(int argc, char **argv) {
         g.update().split(r, ro, ri, 2);
         f.compute_at(g, ro).unroll(x);
 
-        Buffer<int> im = g.realize({10});
-
-        if (call_counter != 10) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
+        Buffer<int> im = g.realize(10);
 
         for (int i = 0; i < im.width(); i++) {
             if (im(i) != i) {
                 printf("im(%d) = %d instead of %d\n", i, im(i), i);
-                return 1;
+                return -1;
             }
         }
         call_counter = 0;
@@ -82,17 +78,12 @@ int main(int argc, char **argv) {
         g.update().split(r, ro, ri, 2).unroll(ri);
         f.compute_at(g, ri);
 
-        Buffer<int> im = g.realize({10});
-
-        if (call_counter != 10) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
+        Buffer<int> im = g.realize(10);
 
         for (int i = 0; i < im.width(); i++) {
             if (im(i) != i) {
                 printf("im(%d) = %d instead of %d\n", i, im(i), i);
-                return 1;
+                return -1;
             }
         }
         call_counter = 0;
@@ -113,18 +104,13 @@ int main(int argc, char **argv) {
         g.update().split(r, ro, ri, 2).reorder(ro, ri);
         f.compute_at(g, ro);
 
-        Buffer<int> im = g.realize({10});
-
-        if (call_counter != 10) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
+        Buffer<int> im = g.realize(10);
 
         for (int i = 0; i < im.width(); i++) {
             int correct = (i / 2) + ((i % 2 == 0) ? 0 : 5);
             if (im(i) != correct) {
                 printf("im(%d) = %d instead of %d\n", i, im(i), correct);
-                return 1;
+                return -1;
             }
         }
         call_counter = 0;
@@ -143,49 +129,13 @@ int main(int argc, char **argv) {
         g.update().split(r, ro, ri, 4).split(ri, rio, rii, 2).fuse(rio, ro, fused);
         f.compute_at(g, fused);
 
-        Buffer<int> im = g.realize({20});
-
-        if (call_counter != 20) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
+        Buffer<int> im = g.realize(20);
 
         for (int i = 0; i < im.width(); i++) {
             int correct = i;
             if (im(i) != correct) {
                 printf("im(%d) = %d instead of %d\n", i, im(i), correct);
-                return 1;
-            }
-        }
-        call_counter = 0;
-    }
-
-    {
-        // Split by a non-factor and compute something at the split,
-        // to check if guardwithif is respected in the bounds
-        // relationship.
-        Func f, g;
-        Var x;
-        RDom r(0, 10);
-        RVar ri, ro;
-        f(x) = count(x);
-        g(x) = 0;
-        g(r) = f(r);
-
-        g.update().split(r, ro, ri, 3);
-        f.compute_at(g, ro);
-
-        Buffer<int> im = g.realize({10});
-
-        if (call_counter != 10) {
-            printf("Wrong number of calls to f: %d\n", call_counter);
-            return 1;
-        }
-
-        for (int i = 0; i < im.width(); i++) {
-            if (im(i) != i) {
-                printf("im(%d) = %d instead of %d\n", i, im(i), i);
-                return 1;
+                return -1;
             }
         }
         call_counter = 0;

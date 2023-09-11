@@ -4,7 +4,7 @@ using namespace Halide;
 
 int num_stores = 0;
 
-int my_trace(JITUserContext *user_context, const halide_trace_event_t *e) {
+int my_trace(void *user_context, const halide_trace_event_t *e) {
     if (e->event == halide_trace_store) {
         num_stores++;
     }
@@ -36,10 +36,10 @@ int main(int argc, char **argv) {
     for (int i = 0; i < iters; i++) {
         // For each iteration, first copy the diagonal up and
         // down. Pure in x.
-        g(x, x + 1) = g(x, x);
-        g(x, x - 1) = g(x, x);
+        g(x, x+1) = g(x, x);
+        g(x, x-1) = g(x, x);
         // Then blur the diagonal horizontally. Pure in y.
-        g(y, y) = (g(y, y) + g(y - 1, y) + g(y + 1, y)) / 3.0f;
+        g(y, y) = (g(y, y) + g(y-1, y) + g(y+1, y))/3.0f;
     }
 
     g.compute_root();
@@ -61,23 +61,23 @@ int main(int argc, char **argv) {
     int output_extent = 19;
 
     int last_iteration_extent = output_extent;
-    int first_iteration_extent = output_extent + 2 * iters;
+    int first_iteration_extent = output_extent + 2*iters;
 
-    int expected = (first_iteration_extent +                                            // pure definition
-                    iters * (last_iteration_extent + 2 + first_iteration_extent) / 2 +  // first update
-                    iters * (last_iteration_extent + 2 + first_iteration_extent) / 2 +  // second update
-                    iters * (last_iteration_extent + first_iteration_extent - 2) / 2);  // third update
+    int expected = (first_iteration_extent + // pure definition
+                    iters * (last_iteration_extent + 2 + first_iteration_extent) / 2 + // first update
+                    iters * (last_iteration_extent + 2 + first_iteration_extent) / 2 + // second update
+                    iters * (last_iteration_extent + first_iteration_extent - 2) / 2); // third update
 
     g.trace_stores();
-    h.jit_handlers().custom_trace = &my_trace;
-    h.realize({output_extent});
+    h.set_custom_trace(&my_trace);
+    h.realize(output_extent);
 
     if (num_stores != expected) {
         printf("Did not store to g the right numbers of times\n"
                " Expected: %d\n"
                " Actual: %d\n",
                expected, num_stores);
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

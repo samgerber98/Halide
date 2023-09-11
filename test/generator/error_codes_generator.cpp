@@ -4,21 +4,22 @@ namespace {
 
 class ErrorCodes : public Halide::Generator<ErrorCodes> {
 public:
-    Input<Buffer<int32_t, 2>> input{"input"};
-    Input<int> f_explicit_bound{"f_explicit_bound", 1, 0, 64};
-    Output<Buffer<int32_t, 2>> output{"output"};
+    ImageParam input { Int(32), 2, "input" };
+    Param<int> f_explicit_bound {"f_explicit_bound", 1, 0, 64};
 
-    void generate() {
-        assert(!get_target().has_feature(Target::LargeBuffers));
+
+    Func build() {
+        target.set(get_target().without_feature(Target::LargeBuffers));
+        Func f;
         Var x, y;
 
-        output(x, y) = input(x, y);
-        output.bound(x, 0, f_explicit_bound);
+        f(x, y) = input(x, y);
+        f.bound(x, 0, f_explicit_bound);
 
-        add_requirement(input.dim(1).extent() == 123);
+        return f;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<ErrorCodes> register_my_gen{"error_codes"};
 
-HALIDE_REGISTER_GENERATOR(ErrorCodes, error_codes)
+}  // namespace

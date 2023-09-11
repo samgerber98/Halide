@@ -1,14 +1,14 @@
 // Halide tutorial lesson 15: Generators part 1
 
 // This lesson demonstrates how to encapsulate Halide pipelines into
-// reusable components called generators.
+// resuable components called generators.
 
 // On linux, you can compile and run it like so:
-// g++ lesson_15*.cpp <path/to/tools/halide_image_io.h>/GenGen.cpp -g -std=c++17 -fno-rtti -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -lpthread -ldl -o lesson_15_generate
+// g++ lesson_15*.cpp ../tools/GenGen.cpp -g -std=c++11 -fno-rtti -I ../include -L ../bin -lHalide -lpthread -ldl -o lesson_15_generate
 // bash lesson_15_generators_usage.sh
 
 // On os x:
-// g++ lesson_15*.cpp <path/to/tools/halide_image_io.h>/GenGen.cpp -g -std=c++17 -fno-rtti -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -o lesson_15_generate
+// g++ lesson_15*.cpp ../tools/GenGen.cpp -g -std=c++11 -fno-rtti -I ../include -L ../bin -lHalide -o lesson_15_generate
 // bash lesson_15_generators_usage.sh
 
 // If you have the entire Halide source tree, you can also build it by
@@ -28,14 +28,12 @@ using namespace Halide;
 // define a class that inherits from Halide::Generator.
 class MyFirstGenerator : public Halide::Generator<MyFirstGenerator> {
 public:
-    // We declare the Inputs to the Halide pipeline as public
-    // member variables. They'll appear in the signature of our generated
-    // function in the same order as we declare them.
-    Input<uint8_t> offset{"offset"};
-    Input<Buffer<uint8_t, 2>> input{"input"};
-
-    // We also declare the Outputs as public member variables.
-    Output<Buffer<uint8_t, 2>> brighter{"brighter"};
+    // We declare the parameters to the Halide pipeline as public
+    // member variables. We'll give the parameters explicit names this
+    // time. They'll appear in the signature of our generated function
+    // in the same order as we declare them.
+    Param<uint8_t> offset{"offset"};
+    ImageParam input{UInt(8), 2, "input"};
 
     // Typically you declare your Vars at this scope as well, so that
     // they can be used in any helper methods you add later.
@@ -43,14 +41,18 @@ public:
 
     // We then define a method that constructs and return the Halide
     // pipeline:
-    void generate() {
-        // In lesson 10, here is where we called
-        // Func::compile_to_file. In a Generator, we just need to
-        // define the Output(s) representing the output of the pipeline.
+    Func build() {
+        // Define the Func.
+        Func brighter;
         brighter(x, y) = input(x, y) + offset;
 
         // Schedule it.
         brighter.vectorize(x, 16).parallel(y);
+
+        // In lesson 10, here is where we called
+        // Func::compile_to_file. In a Generator, we just need to
+        // return the Func representing the output of the pipeline.
+        return brighter;
     }
 };
 
@@ -58,7 +60,7 @@ public:
 // an "int main(...)" that provides the command-line interface to use
 // your generator class. We need to tell that code about our
 // generator. We do this like so:
-HALIDE_REGISTER_GENERATOR(MyFirstGenerator, my_first_generator)
+RegisterGenerator<MyFirstGenerator> my_first_generator{"my_first_generator"};
 
 // If you like, you can put multiple Generators in the one file. This
 // could be a good idea if they share some common code. Let's define
@@ -73,9 +75,9 @@ public:
 
     // ... and another representing a constant scale factor to use:
     GeneratorParam<float> scale{"scale",
-                                1.0f /* default value */,
-                                0.0f /* minimum value */,
-                                100.0f /* maximum value */};
+            1.0f /* default value */,
+            0.0f /* minimum value */,
+            100.0f /* maximum value */};
 
     // You can define GeneratorParams of all the basic scalar
     // types. For numeric types you can optionally provide a minimum
@@ -84,30 +86,28 @@ public:
     // You can also define GeneratorParams for enums. To make this
     // work you must provide a mapping from strings to your enum
     // values.
-    enum class Rotation { None,
-                          Clockwise,
-                          CounterClockwise };
+    enum class Rotation { None, Clockwise, CounterClockwise };
     GeneratorParam<Rotation> rotation{"rotation",
-                                      /* default value */
-                                      Rotation::None,
-                                      /* map from names to values */
-                                      {{"none", Rotation::None},
-                                       {"cw", Rotation::Clockwise},
-                                       {"ccw", Rotation::CounterClockwise}}};
+            /* default value */
+            Rotation::None,
+            /* map from names to values */
+            {{ "none", Rotation::None },
+             { "cw",   Rotation::Clockwise },
+             { "ccw",  Rotation::CounterClockwise }}};
 
-    // We'll use the same Inputs as before:
-    Input<uint8_t> offset{"offset"};
-    Input<Buffer<uint8_t, 2>> input{"input"};
+    // Halide::Type is supported as though it was an enum. It's most
+    // useful for customizing the type of input or output image
+    // params.
+    GeneratorParam<Halide::Type> output_type{"output_type", Int(32)};
 
-    // And a similar Output. Note that we don't specify a type for the Buffer:
-    // at compile-time, we must specify an explicit type via the "output.type"
-    // GeneratorParam (which is implicitly defined for this Output).
-    Output<Buffer<void, 2>> output{"output"};
+    // We'll use the same Param and ImageParam as before:
+    Param<uint8_t> offset{"offset"};
+    ImageParam input{UInt(8), 2, "input"};
 
     // And we'll declare our Vars here as before.
     Var x, y;
 
-    void generate() {
+    Func build() {
         // Define the Func. We'll use the compile-time scale factor as
         // well as the runtime offset param.
         Func brighter;
@@ -124,15 +124,16 @@ public:
             rotated(x, y) = brighter(x, y);
             break;
         case Rotation::Clockwise:
-            rotated(x, y) = brighter(y, 100 - x);
+            rotated(x, y) = brighter(y, 100-x);
             break;
         case Rotation::CounterClockwise:
-            rotated(x, y) = brighter(100 - y, x);
+            rotated(x, y) = brighter(100-y, x);
             break;
         }
 
         // We'll then cast to the desired output type.
-        output(x, y) = cast(output.type(), rotated(x, y));
+        Func output;
+        output(x, y) = cast(output_type, rotated(x, y));
 
         // The structure of the pipeline depended on the generator
         // params. So will the schedule.
@@ -142,7 +143,7 @@ public:
         // provide a helper called "natural_vector_size" which will
         // pick a reasonable factor for you given the type and the
         // target you're compiling to.
-        output.vectorize(x, natural_vector_size(output.type()));
+        output.vectorize(x, natural_vector_size(output_type));
 
         // Now we'll possibly parallelize it:
         if (parallel) {
@@ -155,13 +156,16 @@ public:
         if (rotation != Rotation::None) {
             rotated
                 .compute_at(output, y)
-                .vectorize(x, natural_vector_size(rotated.types()[0]));
+                .vectorize(x, natural_vector_size(rotated.output_types()[0]));
         }
+
+        return output;
     }
+
 };
 
 // Register our second generator:
-HALIDE_REGISTER_GENERATOR(MySecondGenerator, my_second_generator)
+RegisterGenerator<MySecondGenerator> my_second_generator{"my_second_generator"};
 
 // After compiling this file, see how to use it in
 // lesson_15_generators_build.sh

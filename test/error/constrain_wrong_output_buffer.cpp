@@ -13,6 +13,5 @@ int main(int argc, char **argv) {
 
     f.compile_jit();
 
-    printf("Success!\n");
     return 0;
 }

@@ -1,52 +1,41 @@
 include ../support/Makefile.inc
 
-.PHONY: build clean test
-
-build: $(BIN)/$(HL_TARGET)/process
+all: $(BIN)/process
 
 TIMING_ITERATIONS ?= 5
 
-$(GENERATOR_BIN)/camera_pipe.generator: camera_pipe_generator.cpp $(GENERATOR_DEPS)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LIBHALIDE_LDFLAGS) $(HALIDE_SYSTEM_LIBS)
+$(BIN)/camera_pipe_exec: camera_pipe_generator.cpp $(GENERATOR_DEPS)
+	@-mkdir -p $(BIN)
+	$(CXX) $(CXXFLAGS) -g -fno-rtti $(filter-out %.h,$^) -o $@ $(LDFLAGS)
 
-$(BIN)/%/camera_pipe.a: $(GENERATOR_BIN)/camera_pipe.generator
-	@mkdir -p $(@D)
-	$^ -g camera_pipe -e $(GENERATOR_OUTPUTS) -o $(@D) -f camera_pipe target=$*
+$(BIN)/camera_pipe.a: $(BIN)/camera_pipe_exec
+	@-mkdir -p $(BIN)
+	$^ -o $(BIN) target=$(HL_TARGET)
 
-$(BIN)/%/camera_pipe_auto_schedule.a: $(GENERATOR_BIN)/camera_pipe.generator
-	@mkdir -p $(@D)
-	$^ -g camera_pipe -e $(GENERATOR_OUTPUTS) -o $(@D) -f camera_pipe_auto_schedule target=$*-no_runtime autoscheduler=Mullapudi2016
+$(BIN)/viz/camera_pipe.a: $(BIN)/camera_pipe_exec
+	@-mkdir -p $(BIN)/viz
+	HL_TRACE=3 $^ -o $(BIN)/viz target=$(HL_TARGET)
 
-$(BIN)/%/process: process.cpp $(BIN)/%/camera_pipe.a $(BIN)/%/camera_pipe_auto_schedule.a
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -Wall -I$(BIN)/$* $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
+$(BIN)/Demosaic.o: fcam/Demosaic.cpp fcam/Demosaic.h
+	$(CXX) $(CXXFLAGS) -c -Wall -O3 $< -o $@
 
-$(BIN)/%/process_viz: process.cpp $(BIN)/%-trace_all/camera_pipe.a
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -DNO_AUTO_SCHEDULE -Wall -I$(BIN)/$*-trace_all $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
+$(BIN)/Demosaic_ARM.o: fcam/Demosaic_ARM.cpp fcam/Demosaic_ARM.h
+	$(CXX) $(CXXFLAGS) -c -Wall -O3 $< -o $@
 
-$(BIN)/%/out.png: $(BIN)/%/process
-	@mkdir -p $(@D)
-	$(BIN)/$*/process $(IMAGES)/bayer_raw.png 3700 2.0 50 1.0 $(TIMING_ITERATIONS) $@ $(BIN)/$*/h_auto.png
+$(BIN)/process: process.cpp $(BIN)/camera_pipe.a $(BIN)/Demosaic.o $(BIN)/Demosaic_ARM.o
+	$(CXX) $(CXXFLAGS) -Wall -O3 -I$(BIN) $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
 
-../../bin/HalideTraceViz: ../../util/HalideTraceViz.cpp
+$(BIN)/viz/process: process.cpp $(BIN)/viz/camera_pipe.a $(BIN)/Demosaic.o $(BIN)/Demosaic_ARM.o
+	$(CXX) $(CXXFLAGS) -Wall -O3 -I$(BIN)/viz $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
+
+$(BIN)/out.png: $(BIN)/process
+	$(BIN)/process $(IMAGES)/bayer_raw.png 3700 2.0 50 $(TIMING_ITERATIONS) $@ $(BIN)/fcam_c.png $(BIN)/fcam_arm.png
+
+../../bin/HalideTraceViz:
 	$(MAKE) -C ../../ bin/HalideTraceViz
 
-$(BIN)/%/camera_pipe.mp4: $(BIN)/%/process_viz viz.sh $(HALIDE_TRACE_VIZ) ../../bin/HalideTraceViz
-	HL_AVCONV=$(HL_AVCONV) bash viz.sh $(@D)
+$(BIN)/camera_pipe.avi: $(BIN)/viz/process viz.sh $(HALIDE_TRACE_VIZ) ../../bin/HalideTraceViz
+	bash viz.sh $(BIN)
 
 clean:
 	rm -rf $(BIN)
-
-test: $(BIN)/$(HL_TARGET)/out.png
-
-viz: $(BIN)/$(HL_TARGET)/camera_pipe.mp4
-	$(HL_VIDEOPLAYER) $^
-
-$(BIN)/%/viz_auto.mp4: $(BIN)/%/process_viz ../support/viz_auto.sh ../../bin/HalideTraceViz
-	@mkdir -p $(@D)
-	HL_AVCONV=$(HL_AVCONV) bash ../support/viz_auto.sh "$(BIN)/$*/process_viz $(IMAGES)/bayer_small.png 3700 1.8 50 1 1 $(BIN)/$*/out.png" ../../bin/HalideTraceViz $@
-
-viz_auto: $(BIN)/$(HL_TARGET)/viz_auto.mp4
-	$(HL_VIDEOPLAYER) $^

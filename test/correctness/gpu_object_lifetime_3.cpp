@@ -1,13 +1,13 @@
 #include "Halide.h"
-#include "gpu_object_lifetime_tracker.h"
-
 #include <iostream>
+
+#include "test/common/gpu_object_lifetime_tracker.h"
 
 using namespace Halide;
 
 Internal::GpuObjectLifetimeTracker tracker;
 
-void halide_print(JITUserContext *user_context, const char *str) {
+void halide_print(void *user_context, const char *str) {
     printf("%s", str);
 
     tracker.record_gpu_debug(str);
@@ -16,12 +16,11 @@ void halide_print(JITUserContext *user_context, const char *str) {
 int main(int argc, char *argv[]) {
     Var x, xi;
 
-    Target target = get_jit_target_from_environment();
-
-    // We need to hook the default handler too, to catch the frees done by release_all
-    JITHandlers handlers;
+    Internal::JITHandlers handlers;
     handlers.custom_print = halide_print;
     Internal::JITSharedRuntime::set_default_handlers(handlers);
+
+    Target target = get_jit_target_from_environment();
 
     // We need debug output to record object creation.
     target.set_feature(Target::Debug);
@@ -43,7 +42,7 @@ int main(int argc, char *argv[]) {
             if (i % 3 != 0) {
                 if (target.has_gpu_feature()) {
                     f[i].gpu_tile(x, xi, 32);
-                } else if (target.has_feature(Target::HVX)) {
+                } else if (target.features_any_of({Target::HVX_64, Target::HVX_128})) {
                     f[i].hexagon();
                 }
             }
@@ -51,17 +50,18 @@ int main(int argc, char *argv[]) {
 
         Func output = f[stage_count - 1];
 
-        output.realize({256}, target);
+        output.set_custom_print(halide_print);
+
+        output.realize(256, target);
     }
 
     Internal::JITSharedRuntime::release_all();
 
     int ret = tracker.validate_gpu_object_lifetime(true /* allow_globals */, true /* allow_none */, 1 /* max_globals */);
     if (ret != 0) {
-        fprintf(stderr, "validate_gpu_object_lifetime() failed\n");
-        return 1;
+        return ret;
     }
 
-    printf("Success!\n");
+    std::cout << "Success!" << std::endl;
     return 0;
 }

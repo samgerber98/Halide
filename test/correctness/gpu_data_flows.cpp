@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
         f.compute_root();
         if (target.has_gpu_feature()) {
             g.compute_root().gpu_tile(x, xi, 16);
-        } else if (target.has_feature(Target::HVX)) {
+        } else if (target.features_any_of({Target::HVX_64, Target::HVX_128})) {
             g.compute_root().hexagon();
         }
         out.compute_root();
@@ -51,10 +51,11 @@ int main(int argc, char **argv) {
             int correct = (input(x) + 1) * 2 + 3;
             if (output1(x) != correct) {
                 printf("output1(%d) = %d instead of %d\n", x, output1(x), correct);
-                return 1;
+                return -1;
             }
         }
     }
+
 
     {
         // Pipeline 2 will do input -> dev -> dev -> output
@@ -67,7 +68,7 @@ int main(int argc, char **argv) {
         if (target.has_gpu_feature()) {
             f.compute_root().gpu_tile(x, xi, 16);
             out.compute_root().gpu_tile(x, xi, 16);
-        } else if (target.has_feature(Target::HVX)) {
+        } else if (target.features_any_of({Target::HVX_64, Target::HVX_128})) {
             f.compute_root().hexagon();
             out.compute_root().hexagon();
         }
@@ -84,7 +85,7 @@ int main(int argc, char **argv) {
             int correct = (input(x) + 1) * 2;
             if (output2(x) != correct) {
                 printf("output2(%d) = %d instead of %d\n", x, output2(x), correct);
-                return 1;
+                return -1;
             }
         }
     }

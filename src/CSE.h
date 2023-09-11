@@ -4,7 +4,7 @@
 /** \file
  * Defines a pass for introducing let expressions to wrap common sub-expressions. */
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
@@ -17,21 +17,16 @@ namespace Internal {
  * because exprs that come in from the front-end are small when
  * considered as a graph, but combinatorially large when considered as
  * a tree. For an example of a such a case, see
- * test/code_explosion.cpp
- *
- * The last parameter determines whether all common subexpressions are
- * lifted, or only those that the simplifier would not subsitute back
- * in (e.g. addition of a constant).
- */
-Expr common_subexpression_elimination(const Expr &, bool lift_all = false);
+ * test/code_explosion.cpp */
+EXPORT Expr common_subexpression_elimination(Expr);
 
 /** Do common-subexpression-elimination on each expression in a
  * statement. Does not introduce let statements. */
-Stmt common_subexpression_elimination(const Stmt &, bool lift_all = false);
+EXPORT Stmt common_subexpression_elimination(Stmt);
 
-void cse_test();
+EXPORT void cse_test();
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

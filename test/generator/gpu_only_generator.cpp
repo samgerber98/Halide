@@ -4,23 +4,24 @@ namespace {
 
 class GpuOnly : public Halide::Generator<GpuOnly> {
 public:
-    Input<Buffer<int32_t, 2>> input{"input"};
-    Output<Buffer<int32_t, 2>> output{"output"};
+    ImageParam input{ Int(32), 2, "input" };
 
-    void generate() {
+    Func build() {
         Var x("x"), y("y");
 
         // Create a simple pipeline that scales pixel values by 2.
-        output(x, y) = input(x, y) * 2;
+        Func f("f");
+        f(x, y) = input(x, y) * 2;
 
         Target target = get_target();
         if (target.has_gpu_feature()) {
             Var xo, yo, xi, yi;
-            output.gpu_tile(x, y, xo, yo, xi, yi, 16, 16);
+            f.gpu_tile(x, y, xo, yo, xi, yi, 16, 16);
         }
+        return f;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<GpuOnly> register_my_gen{"gpu_only"};
 
-HALIDE_REGISTER_GENERATOR(GpuOnly, gpu_only)
+}  // namespace

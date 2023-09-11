@@ -1,10 +1,7 @@
 #ifndef HALIDE_SKIP_STAGES
 #define HALIDE_SKIP_STAGES
 
-#include <string>
-#include <vector>
-
-#include "Expr.h"
+#include "IR.h"
 
 /** \file
  * Defines a pass that dynamically avoids realizing unnecessary stages.
@@ -20,7 +17,7 @@ namespace Internal {
  * inject ifs that guard the production. */
 Stmt skip_stages(Stmt s, const std::vector<std::string> &order);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

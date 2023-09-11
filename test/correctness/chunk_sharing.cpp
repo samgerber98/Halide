@@ -1,5 +1,5 @@
-#include "Halide.h"
 #include <stdio.h>
+#include "Halide.h"
 
 using namespace Halide;
 
@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
 
     printf("Realizing function...\n");
 
-    Buffer<int> im = d.realize({32, 32});
+    Buffer<int> im = d.realize(32, 32);
 
     for (int y = 0; y < 32; y++) {
         for (int x = 0; x < 32; x++) {
@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
             int d = b + c;
             if (im(x, y) != d) {
                 printf("im(%d, %d) = %d instead of %d\n", x, y, im(x, y), d);
-                return 1;
+                return -1;
             }
         }
     }

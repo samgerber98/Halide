@@ -3,16 +3,24 @@
 
 using namespace Halide;
 
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 int bounds_query_count[4];
 int call_count[4];
-extern "C" HALIDE_EXPORT_SYMBOL int call_counter(halide_buffer_t *input, int x, int idx, halide_buffer_t *output) {
-    if (input->is_bounds_query()) {
+extern "C" DLLEXPORT int call_counter(buffer_t *input, int x, int idx, buffer_t *output) {
+    if (input->host == nullptr) {
         bounds_query_count[idx]++;
-        input->dim[0] = output->dim[0];
+        input->min[0] = output->min[0];
+        input->extent[0] = output->extent[0];
+        input->elem_size = 1;
         return 0;
     }
     call_count[idx]++;
-    for (int32_t i = 0; i < output->dim[0].extent; i++) {
+    for (int32_t i = 0; i < output->extent[0]; i++) {
         output->host[i] = input->host[i] + x;
     }
 
@@ -31,7 +39,7 @@ void check_queries(int a = 0, int b = 0, int c = 0, int d = 0) {
     for (int i = 0; i < 4; i++) {
         if (correct[i] != bounds_query_count[i]) {
             printf("bounds_query_count[%d] was supposed to be %d but instead is %d\n", i, correct[i], bounds_query_count[i]);
-            exit(1);
+            exit(-1);
         }
     }
 }
@@ -41,7 +49,7 @@ void check_counts(int a = 0, int b = 0, int c = 0, int d = 0) {
     for (int i = 0; i < 4; i++) {
         if (correct[i] != call_count[i]) {
             printf("call_count[%d] was supposed to be %d but instead is %d\n", i, correct[i], call_count[i]);
-            exit(1);
+            exit(-1);
         }
     }
 }
@@ -49,8 +57,6 @@ void check_counts(int a = 0, int b = 0, int c = 0, int d = 0) {
 int main(int argc, char **argv) {
     Var x;
     Param<bool> toggle1, toggle2;
-
-    Buffer<uint8_t> out(10);
 
     {
         // Make a diamond-shaped graph where only one of the two
@@ -69,18 +75,18 @@ int main(int argc, char **argv) {
 
         reset_counts();
         toggle1.set(true);
-        f4.realize(out);
+        Buffer<uint8_t> result1 = f4.realize(10);
         for (int32_t i = 0; i < 10; i++) {
-            assert(out(i) == i + 1);
+            assert(result1(i) == i + 1);
         }
         check_queries(2, 2);
         check_counts(1, 0);
 
         reset_counts();
         toggle1.set(false);
-        f4.realize(out);
+        Buffer<uint8_t> result2 = f4.realize(10);
         for (int32_t i = 0; i < 10; i++) {
-            assert(out(i) == i + 2);
+            assert(result2(i) == i + 2);
         }
         check_queries(2, 2);
         check_counts(0, 1);
@@ -119,30 +125,31 @@ int main(int argc, char **argv) {
         reset_counts();
         toggle1.set(true);
         toggle2.set(true);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 1, 1);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(true);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 0, 1);
 
         reset_counts();
         toggle1.set(true);
         toggle2.set(false);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 1, 0);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(false);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(0, 0, 0);
+
     }
 
     {
@@ -162,7 +169,7 @@ int main(int argc, char **argv) {
                               {identity, 1, 1},
                               UInt(8), 1);
 
-        f1(x) = Tuple(extern1(x), extern2(x + 1));
+        f1(x) = Tuple(extern1(x), extern2(x+1));
         f2(x) = select(toggle1, f1(x)[0], 0) + f1(x)[1];
 
         identity.compute_root();
@@ -175,14 +182,13 @@ int main(int argc, char **argv) {
 
         reset_counts();
         toggle1.set(true);
-
-        f2.realize(out);
+        f2.realize(10);
         check_queries(2, 2);
         check_counts(1, 1);
 
         reset_counts();
         toggle1.set(false);
-        f2.realize(out);
+        f2.realize(10);
         check_queries(2, 2);
         check_counts(1, 1);
     }
@@ -201,7 +207,7 @@ int main(int argc, char **argv) {
                               {identity, 1, 1},
                               UInt(8), 1);
 
-        f1(x) = Tuple(extern1(x), extern2(x + 1));
+        f1(x) = Tuple(extern1(x), extern2(x+1));
         f2(x) = select(toggle1, f1(x)[0], 0);
 
         identity.compute_root();
@@ -209,19 +215,19 @@ int main(int argc, char **argv) {
         extern2.compute_root();
 
         f1.compute_root();
-        f2.realize(out);
+        f2.realize(10);
 
         f2.compile_jit();
 
         reset_counts();
         toggle1.set(true);
-        f2.realize(out);
+        f2.realize(10);
         check_queries(2, 2);
         check_counts(1, 1);
 
         reset_counts();
         toggle1.set(false);
-        f2.realize(out);
+        f2.realize(10);
         check_queries(2, 2);
         check_counts(0, 0);
     }
@@ -263,32 +269,33 @@ int main(int argc, char **argv) {
         reset_counts();
         toggle1.set(true);
         toggle2.set(true);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 1, 1);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(true);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 0, 1);
 
         reset_counts();
         toggle1.set(true);
         toggle2.set(false);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(1, 1, 0);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(false);
-        f4.realize(out);
+        f4.realize(10);
         check_queries(2, 2, 2);
         check_counts(0, 0, 0);
     }
 
     printf("Success!\n");
     return 0;
+
 }

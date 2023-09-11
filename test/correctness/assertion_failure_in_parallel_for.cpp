@@ -1,12 +1,10 @@
 #include "Halide.h"
-#include <atomic>
 #include <stdio.h>
 
 using namespace Halide;
 
-std::atomic<bool> error_occurred{false};
-
-void halide_error(JITUserContext *ctx, const char *msg) {
+int error_occurred = false;
+void halide_error(void *ctx, const char *msg) {
     printf("Expected: %s\n", msg);
     error_occurred = true;
 }
@@ -35,12 +33,12 @@ int main(int argc, char **argv) {
 
     split.set(11);
 
-    g.jit_handlers().custom_error = halide_error;
-    g.realize({40, 40});
+    g.set_error_handler(&halide_error);
+    g.realize(40, 40);
 
     if (!error_occurred) {
         printf("There was supposed to be an error\n");
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

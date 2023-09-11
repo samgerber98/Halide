@@ -15,8 +15,9 @@ int main(int argc, char **argv) {
     }
     f.compute_root();
 
-    Buffer<int> im = f.realize({N, N});
+    Buffer<int> im = f.realize(N, N);
 
     printf("Success!\n");
     return 0;
+
 }

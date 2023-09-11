@@ -27,9 +27,6 @@ WEAK int halide_start_clock(void *user_context) {
 }
 
 WEAK int64_t halide_current_time_ns(void *user_context) {
-    // It is an error to call halide_current_time_ns() if halide_start_clock() has never been called
-    halide_debug_assert(user_context, halide_reference_clock_inited);
-
     int64_t clock;
     QueryPerformanceCounter(&clock);
     clock -= halide_reference_clock;
@@ -40,4 +37,5 @@ WEAK int64_t halide_current_time_ns(void *user_context) {
 WEAK void halide_sleep_ms(void *user_context, int ms) {
     Sleep(ms);
 }
+
 }

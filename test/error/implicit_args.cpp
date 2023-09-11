@@ -4,7 +4,7 @@
 using namespace Halide;
 
 int main(int argc, char **argv) {
-    Var x("x"), y("y"), z("z");
+   	Var x("x"), y("y"), z("z");
 
     Func f("f"), g("g"), h("h");
 
@@ -20,6 +20,5 @@ int main(int argc, char **argv) {
     f(x, _) = g(_) + 2;
     f(x, _) += h(_) + 3;
 
-    printf("Success!\n");
     return 0;
 }

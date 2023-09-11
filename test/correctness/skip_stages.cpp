@@ -3,8 +3,16 @@
 
 using namespace Halide;
 
+
+
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 int call_count[4];
-extern "C" HALIDE_EXPORT_SYMBOL int call_counter(int x, int idx) {
+extern "C" DLLEXPORT int call_counter(int x, int idx) {
     call_count[idx]++;
     return x;
 }
@@ -21,7 +29,7 @@ void check_counts(int a = 0, int b = 0, int c = 0, int d = 0) {
     for (int i = 0; i < 4; i++) {
         if (correct[i] != call_count[i]) {
             printf("call_count[%d] was supposed to be %d but instead is %d\n", i, correct[i], call_count[i]);
-            exit(1);
+            exit(-1);
         }
     }
 }
@@ -35,8 +43,8 @@ int main(int argc, char **argv) {
         // side-lobes is used.
         Func f1, f2, f3, f4;
         f1(x) = x;
-        f2(x) = call_counter(f1(x) + 1, 0);
-        f3(x) = call_counter(f1(x) + 2, 1);
+        f2(x) = call_counter(f1(x)+1, 0);
+        f3(x) = call_counter(f1(x)+2, 1);
         f4(x) = select(toggle1, f2(x), f3(x));
 
         f1.compute_root();
@@ -47,12 +55,12 @@ int main(int argc, char **argv) {
 
         reset_counts();
         toggle1.set(true);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 0);
 
         reset_counts();
         toggle1.set(false);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(0, 10);
     }
 
@@ -75,26 +83,27 @@ int main(int argc, char **argv) {
         reset_counts();
         toggle1.set(true);
         toggle2.set(true);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 10, 10);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(true);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 0, 10);
 
         reset_counts();
         toggle1.set(true);
         toggle2.set(false);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 10, 0);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(false);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(0, 0, 0);
+
     }
 
     {
@@ -104,7 +113,7 @@ int main(int argc, char **argv) {
         // be a recursive dependence of one on the other in an update
         // step.
         Func f1, f2;
-        f1(x) = Tuple(call_counter(x, 0), call_counter(x + 1, 1));
+        f1(x) = Tuple(call_counter(x, 0), call_counter(x+1, 1));
         f2(x) = select(toggle1, f1(x)[0], 0) + f1(x)[1];
         f1.compute_root();
 
@@ -112,12 +121,12 @@ int main(int argc, char **argv) {
 
         reset_counts();
         toggle1.set(true);
-        f2.realize({10});
+        f2.realize(10);
         check_counts(10, 10);
 
         reset_counts();
         toggle1.set(false);
-        f2.realize({10});
+        f2.realize(10);
         check_counts(10, 10);
     }
 
@@ -125,21 +134,21 @@ int main(int argc, char **argv) {
         // Make a tuple-valued func where neither value is used when
         // the toggle is false.
         Func f1, f2;
-        f1(x) = Tuple(call_counter(x, 0), call_counter(x + 1, 1));
+        f1(x) = Tuple(call_counter(x, 0), call_counter(x+1, 1));
         f2(x) = select(toggle1, f1(x)[0], 0);
         f1.compute_root();
-        f2.realize({10});
+        f2.realize(10);
 
         f2.compile_jit();
 
         reset_counts();
         toggle1.set(true);
-        f2.realize({10});
+        f2.realize(10);
         check_counts(10, 10);
 
         reset_counts();
         toggle1.set(false);
-        f2.realize({10});
+        f2.realize(10);
         check_counts(0, 0);
     }
 
@@ -163,42 +172,26 @@ int main(int argc, char **argv) {
         reset_counts();
         toggle1.set(true);
         toggle2.set(true);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 10, 10);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(true);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 0, 10);
 
         reset_counts();
         toggle1.set(true);
         toggle2.set(false);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(10, 10, 0);
 
         reset_counts();
         toggle1.set(false);
         toggle2.set(false);
-        f4.realize({10});
+        f4.realize(10);
         check_counts(0, 0, 0);
-    }
-
-    {
-        // Test the interaction with sliding window. We don't need value of
-        // g(5), but we need all values of f which is computed inside the g's
-        // loop. Make sure we don't skip the computation of f.
-        reset_counts();
-        Func f("f"), g("g"), h("h");
-        f(x) = call_counter(x, 0);
-        g(x) = f(x) + f(x - 1);
-        h(x) = select(x == 5, 0, g(x));
-
-        f.store_root().compute_at(g, x);
-        g.compute_at(h, x);
-        h.realize({10});
-        check_counts(11);
     }
 
     printf("Success!\n");

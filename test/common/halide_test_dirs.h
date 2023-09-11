@@ -4,9 +4,7 @@
 // This file may be used by AOT tests, so it deliberately does not
 // include Halide.h
 
-#include <cassert>
 #include <string>
-
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -82,10 +80,10 @@ inline std::string get_test_tmp_dir() {
     bool is_absolute = dir.size() >= 1 && dir[0] == '/';
     char sep = '/';
 #ifdef _WIN32
-    // Allow for C:\whatever or c:/whatever on Windows
-    if (dir.size() >= 3 && dir[1] == ':' && (dir[2] == '\\' || dir[2] == '/')) {
+    // Allow for C:\whatever on Windows
+    if (dir.size() >= 3 && dir[1] == ':' && dir[2] == '\\') {
         is_absolute = true;
-        sep = dir[2];
+        sep = '\\';
     }
 #endif
     if (!is_absolute) {
@@ -98,7 +96,7 @@ inline std::string get_test_tmp_dir() {
     return dir;
 }
 
-}  // namespace Internal
 }  // namespace Halide
+}  // namespace Internal
 
 #endif  // HALIDE_TEST_DIRS_H

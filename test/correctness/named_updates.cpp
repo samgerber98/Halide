@@ -7,7 +7,8 @@ int main(int argc, char **argv) {
 
     // Test various possible pieces of syntax for tracking the various
     // definitions of a Func. Mostly we just want to make sure they
-    // compile.
+    // compile. We restrict ourselves to not using C++11 for now,
+    // though uniform initializer syntax opens some new possibilities.
     RDom r(0, 16);
 
     Func f;
@@ -23,15 +24,17 @@ int main(int argc, char **argv) {
             f(0) = 1;
 
         Stage rewrites[] = {
-            f(r * 2) = 13,
-            f(r * 4) = 14};
+            f(r*2) = 13,
+            f(r*4) = 14
+        };
 
         struct {
             Stage a, b, c;
         } more_updates = {
-            f(3 * r) = 4,
-            f(2 * r) = 8,
-            f(5 * r) = 2};
+            f(3*r) = 4,
+            f(2*r) = 8,
+            f(5*r) = 2
+        };
 
         f.compute_root();
 
@@ -41,8 +44,6 @@ int main(int argc, char **argv) {
         more_updates.a.vectorize(r, 4);
         more_updates.b.vectorize(r, 4);
         more_updates.c.vectorize(r, 4);
-
-        f.update().unscheduled();  // fix_first isn't scheduled
     }
 
     // Define the same thing without all the weird syntax and without
@@ -50,15 +51,15 @@ int main(int argc, char **argv) {
     {
         ref(x) = x;
         ref(0) = 1;
-        ref(r * 2) = 13;
-        ref(r * 4) = 14;
-        ref(3 * r) = 4;
-        ref(2 * r) = 8;
-        ref(5 * r) = 2;
+        ref(r*2) = 13;
+        ref(r*4) = 14;
+        ref(3*r) = 4;
+        ref(2*r) = 8;
+        ref(5*r) = 2;
     }
 
-    Buffer<int> result = f.realize({128});
-    Buffer<int> result_ref = ref.realize({128});
+    Buffer<int> result = f.realize(128);
+    Buffer<int> result_ref = ref.realize(128);
 
     RDom check(result);
     uint32_t error = evaluate<uint32_t>(
@@ -66,7 +67,7 @@ int main(int argc, char **argv) {
 
     if (error) {
         printf("There was a difference between using named updates and not.\n");
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

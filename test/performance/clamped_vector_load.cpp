@@ -1,12 +1,9 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
-#include "halide_test_dirs.h"
-
-#include <algorithm>
 #include <cstdio>
+#include <algorithm>
+#include "benchmark.h"
 
 using namespace Halide;
-using namespace Halide::Tools;
 
 Buffer<uint16_t> input;
 Buffer<uint16_t> output;
@@ -15,7 +12,7 @@ Buffer<uint16_t> output;
 #define MAX 1020
 
 double test(Func f, bool test_correctness = true) {
-    f.compile_to_assembly(Internal::get_test_tmp_dir() + f.name() + ".s", {input}, f.name());
+    f.compile_to_assembly(f.name() + ".s", {input}, f.name());
     f.compile_jit();
     f.realize(output);
 
@@ -23,31 +20,25 @@ double test(Func f, bool test_correctness = true) {
         for (int y = 0; y < output.height(); y++) {
             for (int x = 0; x < output.width(); x++) {
                 int ix1 = std::max(std::min(x, MAX), MIN);
-                int ix2 = std::max(std::min(x + 1, MAX), MIN);
+                int ix2 = std::max(std::min(x+1, MAX), MIN);
                 uint16_t correct = input(ix1, y) * 3 + input(ix2, y);
                 if (output(x, y) != correct) {
                     printf("output(%d, %d) = %d instead of %d\n",
                            x, y, output(x, y), correct);
-                    exit(1);
+                    exit(-1);
                 }
             }
         }
     }
 
-    return benchmark([&]() { f.realize(output); });
+    return benchmark(1, 10, [&]() { f.realize(output); });
 }
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
-
     // Try doing vector loads with a boundary condition in various
     // ways and compare the performance.
 
-    input = Buffer<uint16_t>(1024 + 8, 320);
+    input = Buffer<uint16_t>(1024+8, 320);
 
     for (int y = 0; y < input.height(); y++) {
         for (int x = 0; x < input.width(); x++) {
@@ -64,7 +55,7 @@ int main(int argc, char **argv) {
     {
         // Do an unclamped load to get a reference number
         Func f;
-        f(x, y) = input(x, y) * 3 + input(x + 1, y);
+        f(x, y) = input(x, y) * 3 + input(x+1, y);
 
         f.vectorize(x, 8);
 
@@ -77,10 +68,10 @@ int main(int argc, char **argv) {
         g(x, y) = input(clamp(x, MIN, MAX), y);
 
         Func f;
-        f(x, y) = g(x, y) * 3 + g(x + 1, y);
+        f(x, y) = g(x, y) * 3 + g(x+1, y);
 
         f.vectorize(x, 8);
-        f.compile_to_lowered_stmt(Internal::get_test_tmp_dir() + "debug_clamped_vector_load.stmt", f.infer_arguments());
+        f.compile_to_lowered_stmt("debug_clamped_vector_load.stmt", f.infer_arguments());
 
         t_clamped = test(f);
     }
@@ -91,7 +82,7 @@ int main(int argc, char **argv) {
         g(x, y) = input(clamp(x, MIN, MAX), y);
 
         Func f;
-        f(x, y) = g(x, y) * 3 + g(x + 1, y);
+        f(x, y) = g(x, y) * 3 + g(x+1, y);
 
         f.vectorize(x, 8);
         g.compute_at(f, x);
@@ -105,7 +96,7 @@ int main(int argc, char **argv) {
         g(x, y) = input(clamp(x, MIN, MAX), y);
 
         Func f;
-        f(x, y) = g(x, y) * 3 + g(x + 1, y);
+        f(x, y) = g(x, y) * 3 + g(x+1, y);
 
         f.vectorize(x, 8);
         g.compute_at(f, y);
@@ -124,7 +115,7 @@ int main(int argc, char **argv) {
                "Scalarize the load: %f\n"
                "Pad the input: %f\n",
                t_ref, t_clamped, t_scalar, t_pad);
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

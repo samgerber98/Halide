@@ -17,21 +17,22 @@ int main(int argc, char **argv) {
     RDom r(0, 4);
 
     f(x) = x;
-    f(r) = f(r - 1) + f(r + 1);
+    f(r) = f(r-1) + f(r+1);
     f.compute_root().vectorize(x, 4);
-    f.update().unscheduled();
+    f.update();
 
     g(x) = f(x);
-    Buffer<int> result = g.realize({4});
+    Buffer<int> result = g.realize(4);
+
 
     // The sequence generated should be:
     // -1, (-1 + 1) = 0, 0 + 2 = 2, 2 + 3 = 5, 5 + 4 = 9
     if (result(0) != 0 || result(1) != 2 || result(2) != 5 || result(3) != 9) {
         printf("Resulting sequence was: %d %d %d %d instead of 0 2 5 9\n",
                result(0), result(1), result(2), result(3));
-        return 1;
+        return -1;
     }
 
-    printf("Success!\n");
+    printf("Success\n");
     return 0;
 }

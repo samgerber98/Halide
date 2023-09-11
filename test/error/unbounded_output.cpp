@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
 
     f.compile_jit();
 
-    printf("Success!\n");
+    printf("I should not have reached here\n");
+
     return 0;
 }

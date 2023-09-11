@@ -1,6 +1,6 @@
+#include <stdio.h>
 #include "Halide.h"
 #include <math.h>
-#include <stdio.h>
 
 using namespace Halide;
 
@@ -15,8 +15,14 @@ using namespace Halide;
 // thread-safe.
 
 // Here we use an extern call to print an ascii-art Mandelbrot set.
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 int call_count = 0;
-extern "C" HALIDE_EXPORT_SYMBOL int draw_pixel(int x, int y, int val) {
+extern "C" DLLEXPORT int draw_pixel(int x, int y, int val) {
     call_count++;
     static int last_y = 0;
     if (y != last_y) {
@@ -27,7 +33,7 @@ extern "C" HALIDE_EXPORT_SYMBOL int draw_pixel(int x, int y, int val) {
     const char *code = " .:-~*={}&%#@";
 
     if (val >= static_cast<int>(strlen(code))) {
-        val = static_cast<int>(strlen(code)) - 1;
+        val = static_cast<int>(strlen(code))-1;
     }
     printf("%c", code[val]);
     return 0;
@@ -37,27 +43,14 @@ HalideExtern_3(int, draw_pixel, int, int, int);
 // Make a complex number type using Tuples
 class Complex {
     Tuple t;
-
 public:
-    Complex(Expr real, Expr imag)
-        : t(real, imag) {
-    }
-    Complex(Tuple tup)
-        : t(tup) {
-    }
-    Complex(FuncRef f)
-        : t(Tuple(f)) {
-    }
-    Expr real() const {
-        return t[0];
-    }
-    Expr imag() const {
-        return t[1];
-    }
+    Complex(Expr real, Expr imag) : t(real, imag) {}
+    Complex(Tuple tup) : t(tup) {}
+    Complex(FuncRef f) : t(Tuple(f)) {}
+    Expr real() const {return t[0];}
+    Expr imag() const {return t[1];}
 
-    operator Tuple() const {
-        return t;
-    }
+    operator Tuple() const {return t;}
 };
 
 // Define the usual complex arithmetic
@@ -84,18 +77,19 @@ Expr magnitude(Complex a) {
     return (a * conjugate(a)).real();
 }
 
+
 int main(int argc, char **argv) {
     Var x, y;
 
     Func mandelbrot;
     // Use a different scale on x and y because terminal characters
     // are not square. Arbitrarily chosen to fit the set nicely.
-    Complex initial(x / 20.0f, y / 8.0f);
+    Complex initial(x/20.0f, y/8.0f);
     Var z;
     mandelbrot(x, y, z) = Complex(0.0f, 0.0f);
     RDom t(1, 40);
-    Complex current = mandelbrot(x, y, t - 1);
-    mandelbrot(x, y, t) = current * current + initial;
+    Complex current = mandelbrot(x, y, t-1);
+    mandelbrot(x, y, t) = current*current + initial;
 
     // How many iterations until something escapes a circle of radius 2?
     Func count;
@@ -114,9 +108,9 @@ int main(int argc, char **argv) {
     printf("\n");
 
     // Check draw_pixel was called the right number of times.
-    if (call_count != 71 * 21) {
+    if (call_count != 71*21) {
         printf("Something went wrong\n");
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

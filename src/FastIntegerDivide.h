@@ -1,10 +1,23 @@
 #ifndef HALIDE_FAST_INTEGER_DIVIDE_H
 #define HALIDE_FAST_INTEGER_DIVIDE_H
 
-#include "Buffer.h"
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
+
+/** Built-in images used for fast_integer_divide below. Use of
+ * fast_integer_divide will automatically embed the appropriate tables
+ * in your object file. They are declared here in case you want to do
+ * something non-default with them. */
+namespace IntegerDivideTable {
+EXPORT Buffer<uint8_t> integer_divide_table_u8();
+EXPORT Buffer<uint8_t> integer_divide_table_s8();
+EXPORT Buffer<uint16_t> integer_divide_table_u16();
+EXPORT Buffer<uint16_t> integer_divide_table_s16();
+EXPORT Buffer<uint32_t> integer_divide_table_u32();
+EXPORT Buffer<uint32_t> integer_divide_table_s32();
+}
+
 
 /** Integer division by small values can be done exactly as multiplies
  * and shifts. This function does integer division for numerators of
@@ -26,17 +39,13 @@ namespace Halide {
  * 256. I.e. it interprets the uint8 divisor as a number from 1 to 256
  * inclusive.
  */
-Expr fast_integer_divide(const Expr &numerator, const Expr &denominator);
-
-/** A variant of the above which rounds towards zero instead of rounding towards
- * negative infinity. */
-Expr fast_integer_divide_round_to_zero(const Expr &numerator, const Expr &denominator);
+EXPORT Expr fast_integer_divide(Expr numerator, Expr denominator);
 
 /** Use the fast integer division tables to implement a modulo
  * operation via the Euclidean identity: a%b = a - (a/b)*b
  */
-Expr fast_integer_modulo(const Expr &numerator, const Expr &denominator);
+EXPORT Expr fast_integer_modulo(Expr numerator, Expr denominator);
 
-}  // namespace Halide
+}
 
 #endif

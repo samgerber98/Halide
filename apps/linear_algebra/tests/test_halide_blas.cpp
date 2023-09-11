@@ -1,63 +1,62 @@
-#include <cblas.h>
 #include <cmath>
-#include <halide_blas.h>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <random>
 #include <string>
+#include <cblas.h>
+#include <halide_blas.h>
+#include "Halide.h"
 
-#define RUN_TEST(method)                                                   \
+#define RUN_TEST(method)                                                \
     std::cout << std::setw(30) << ("Testing " #method ": ") << std::flush; \
-    if (test_##method(N)) {                                                \
-        std::cout << "PASSED\n";                                           \
-    } else {                                                               \
-        std::cout << "FAILED\n";                                           \
+    if (test_##method(N)) {                                             \
+        std::cout << "PASSED\n";                                        \
+    }                                                                   \
+
+#define L1_VECTOR_TEST(method, code)            \
+    bool test_##method(int N) {                 \
+        Scalar alpha = random_scalar();         \
+        Vector ex(random_vector(N));            \
+        Vector ey(random_vector(N));            \
+        Vector ax(ex), ay(ey);                  \
+                                                \
+        {                                       \
+            Scalar *x = &(ex[0]);               \
+            Scalar *y = &(ey[0]);               \
+            cblas_##code;                       \
+        }                                       \
+                                                \
+        {                                       \
+            Scalar *x = &(ax[0]);               \
+            Scalar *y = &(ay[0]);               \
+            hblas_##code;                       \
+        }                                       \
+                                                \
+        return compareVectors(N, ey, ay);       \
     }
 
-#define L1_VECTOR_TEST(method, code)      \
-    bool test_##method(int N) {           \
-        Scalar alpha = random_scalar();   \
-        Vector ex(random_vector(N));      \
-        Vector ey(random_vector(N));      \
-        Vector ax(ex), ay(ey);            \
-                                          \
-        {                                 \
-            Scalar *x = &(ex[0]);         \
-            Scalar *y = &(ey[0]);         \
-            cblas_##code;                 \
-        }                                 \
-                                          \
-        {                                 \
-            Scalar *x = &(ax[0]);         \
-            Scalar *y = &(ay[0]);         \
-            hblas_##code;                 \
-        }                                 \
-                                          \
-        return compareVectors(N, ey, ay); \
-    }
-
-#define L1_SCALAR_TEST(method, code)    \
-    bool test_##method(int N) {         \
-        Scalar alpha = random_scalar(); \
-        Vector ex(random_vector(N));    \
-        Vector ey(random_vector(N));    \
-        Vector ax(ex), ay(ey);          \
-        Scalar er, ar;                  \
-                                        \
-        {                               \
-            Scalar *x = &(ex[0]);       \
-            Scalar *y = &(ey[0]);       \
-            er = cblas_##code;          \
-        }                               \
-                                        \
-        {                               \
-            Scalar *x = &(ax[0]);       \
-            Scalar *y = &(ay[0]);       \
-            ar = hblas_##code;          \
-        }                               \
-                                        \
-        return compareScalars(er, ar);  \
+#define L1_SCALAR_TEST(method, code)            \
+    bool test_##method(int N) {                 \
+        Scalar alpha = random_scalar();         \
+        Vector ex(random_vector(N));            \
+        Vector ey(random_vector(N));            \
+        Vector ax(ex), ay(ey);                  \
+        Scalar er, ar;                          \
+                                                \
+        {                                       \
+            Scalar *x = &(ex[0]);               \
+            Scalar *y = &(ey[0]);               \
+            er = cblas_##code;                  \
+        }                                       \
+                                                \
+        {                                       \
+            Scalar *x = &(ax[0]);               \
+            Scalar *y = &(ay[0]);               \
+            ar = hblas_##code;                  \
+        }                                       \
+                                                \
+        return compareScalars(er, ar);          \
     }
 
 #define L2_TEST(method, cblas_code, hblas_code) \
@@ -113,6 +112,7 @@
         return compareMatrices(N, eC, aC);      \
     }
 
+
 template<class T>
 struct BLASTestBase {
     typedef T Scalar;
@@ -122,9 +122,7 @@ struct BLASTestBase {
     std::random_device rand_dev;
     std::default_random_engine rand_eng;
 
-    BLASTestBase()
-        : rand_eng(rand_dev()) {
-    }
+    BLASTestBase() : rand_eng(rand_dev()) {}
 
     Scalar random_scalar() {
         std::uniform_real_distribution<T> uniform_dist(0.0, 1.0);
@@ -133,7 +131,7 @@ struct BLASTestBase {
 
     Vector random_vector(int N) {
         Vector buff(N);
-        for (int i = 0; i < N; ++i) {
+        for (int i=0; i<N; ++i) {
             buff[i] = random_scalar();
         }
         return buff;
@@ -141,13 +139,13 @@ struct BLASTestBase {
 
     Matrix random_matrix(int N) {
         Matrix buff(N * N);
-        for (int i = 0; i < N * N; ++i) {
+        for (int i=0; i<N*N; ++i) {
             buff[i] = random_scalar();
         }
         return buff;
     }
 
-    bool compareScalars(Scalar x, Scalar y, Scalar epsilon = 32 * std::numeric_limits<Scalar>::epsilon()) {
+    bool compareScalars(Scalar x, Scalar y, Scalar epsilon = 4 * std::numeric_limits<Scalar>::epsilon()) {
         if (x == y) {
             return true;
         } else {
@@ -188,9 +186,9 @@ struct BLASTestBase {
     bool compareMatrices(int N, const Matrix &A, const Matrix &B,
                          Scalar epsilon = 16 * std::numeric_limits<Scalar>::epsilon()) {
         bool equal = true;
-        for (int i = 0; i < N * N; ++i) {
+        for (int i = 0; i < N*N; ++i) {
             if (!compareScalars(A[i], B[i], epsilon)) {
-                std::cerr << "Matrices differ at coords: (" << i % N << ", " << i / N << ")\n";
+                std::cerr << "Matrices differ at coords: (" << i%N << ", " << i/N << ")\n";
                 equal = false;
                 break;
             }
@@ -294,8 +292,9 @@ struct BLASDoubleTests : public BLASTestBase<double> {
 };
 
 int main(int argc, char *argv[]) {
-    BLASFloatTests s;
+    BLASFloatTests  s;
     BLASDoubleTests d;
+
 
     if (argc > 1) {
         for (int i = 1; i < argc; ++i) {
@@ -305,11 +304,9 @@ int main(int argc, char *argv[]) {
             d.run_tests(size);
         }
     } else {
-        int size = 768;
+        int size = 64 * 7;
         std::cout << "Testing halide_blas with N = " << size << ":\n";
         s.run_tests(size);
         d.run_tests(size);
     }
-
-    std::cout << "Success!\n";
 }

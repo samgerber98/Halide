@@ -9,25 +9,29 @@ fi
 mkdir -p bin
 
 c++ jni/edge_detect_generator.cpp ../../tools/GenGen.cpp \
-    -g -fno-rtti -Wall -std=c++17 \
+    -g -fno-rtti -Wall -std=c++11 \
     -I ../../include -I ../../build/include \
     -L ../../bin -lHalide -ldl -lpthread -lz \
     -o bin/edge_detect_generator
 
 c++ jni/deinterleave_generator.cpp ../../tools/GenGen.cpp \
-    -g -fno-rtti -Wall -std=c++17 \
+    -g -fno-rtti -Wall -std=c++11 \
     -I ../../include -I ../../build/include \
     -L ../../bin -lHalide -ldl -lpthread -lz \
     -o bin/deinterleave_generator
 
-for archs in arm-32-android,armeabi arm-32-android-armv7s,armeabi-v7a arm-64-android,arm64-v8a x86-64-android-sse41,x86_64 x86-32-android,x86 ; do
+# 64-bit MIPS (mips-64-android,mips64) currently does not build since
+# llvm will not compile for the R6 version of the ISA without Nan2008
+# and the gcc toolchain used by the Android build setup requires those
+# two options together.
+for archs in arm-32-android,armeabi arm-32-android-armv7s,armeabi-v7a arm-64-android,arm64-v8a mips-32-android,mips x86-64-android-sse41,x86_64 x86-32-android,x86 ; do
     IFS=,
     set $archs
     HL_TARGET=$1
     ANDROID_ABI=$2
     mkdir -p bin/$ANDROID_ABI
-    ./bin/edge_detect_generator -g edge_detect -o bin/$ANDROID_ABI target=$HL_TARGET
-    ./bin/deinterleave_generator -g deinterleave -o bin/$ANDROID_ABI target=$HL_TARGET
+    ./bin/edge_detect_generator -o bin/$ANDROID_ABI target=$HL_TARGET
+    ./bin/deinterleave_generator -o bin/$ANDROID_ABI target=$HL_TARGET
     unset IFS
 done
 

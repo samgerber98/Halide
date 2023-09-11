@@ -4,14 +4,13 @@ namespace {
 
 class Deinterleave : public Halide::Generator<Deinterleave> {
 public:
-    Input<Buffer<uint8_t, 2>> uvInterleaved{"uvInterleaved"};
-    // There is no way to declare a Buffer<Tuple>, so we must use Output<Func> instead
-    Output<Func> result{"result", {UInt(8), UInt(8)}, 2};
+    ImageParam uvInterleaved{ UInt(8), 2, "uvInterleaved" };
 
-    void generate() {
+    Func build() {
         Var x, y;
 
-        result(x, y) = {uvInterleaved(2 * x, y), uvInterleaved(2 * x + 1, y)};
+        Func result("result");
+        result(x, y) = { uvInterleaved(2 * x, y), uvInterleaved(2 * x + 1, y) };
 
         // CPU schedule:
         //   Parallelize over scan lines, 4 scanlines per task.
@@ -24,9 +23,11 @@ public:
         uvInterleaved.dim(0).set_stride(Expr());
         result.specialize(uvInterleaved.dim(0).stride() == 1);
         result.specialize(uvInterleaved.dim(0).stride() == -1);
+
+        return result;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<Deinterleave> register_deinterleave{ "deinterleave" };
 
-HALIDE_REGISTER_GENERATOR(Deinterleave, deinterleave)
+}  // namespace

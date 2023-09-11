@@ -4,10 +4,8 @@
 /** \file
  * Defines the Var - the front-end variable
  */
-#include <string>
-#include <vector>
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 
@@ -17,27 +15,19 @@ namespace Halide {
  * definition, or as an Expr. As an Expr, it always has type
  * Int(32). */
 class Var {
-    /* The expression representing the Var. Guaranteed to be an
-     * Internal::Variable of type Int(32). Created once on
-     * construction of the Var to avoid making a fresh Expr every time
-     * the Var is used in a context in which is will be converted to
-     * one. */
-    Expr e;
-
+    std::string _name;
 public:
     /** Construct a Var with the given name */
-    Var(const std::string &n);
+    EXPORT Var(const std::string &n);
 
     /** Construct a Var with an automatically-generated unique name. */
-    Var();
+    EXPORT Var();
 
     /** Get the name of a Var */
-    const std::string &name() const;
+    const std::string &name() const {return _name;}
 
     /** Test if two Vars are the same. This simply compares the names. */
-    bool same_as(const Var &other) const {
-        return name() == other.name();
-    }
+    bool same_as(const Var &other) const {return _name == other._name;}
 
     /** Implicit var constructor. Implicit variables are injected
      * automatically into a function call if the number of arguments
@@ -56,10 +46,10 @@ public:
      f(x, y) = 3;
      \endcode
      *
-     * A call to f with the placeholder symbol _
-     * will have implicit arguments injected automatically, so f(2, _)
-     * is equivalent to f(2, _0), where _0 = ImplicitVar<0>(), and f(_)
-     * (and indeed f when cast to an Expr) is equivalent to f(_0, _1).
+     * A call to f with the placeholder symbol \ref _
+     * will have implicit arguments injected automatically, so f(2, \ref _)
+     * is equivalent to f(2, \ref _0), where \ref _0 = Var::implicit(0), and f(\ref _)
+     * (and indeed f when cast to an Expr) is equivalent to f(\ref _0, \ref _1).
      * The following definitions are all equivalent, differing only in the
      * variable names.
      *
@@ -117,7 +107,7 @@ public:
      * anonymous functions (e.g. Func(_0 + _1)) this is considered
      * poor style. Instead use \ref lambda.
      */
-    static Var implicit(int n);
+    EXPORT static Var implicit(int n);
 
     /** Return whether a variable name is of the form for an implicit argument.
      * TODO: This is almost guaranteed to incorrectly fire on user
@@ -125,14 +115,14 @@ public:
      * user Var declarations from making names of this form.
      */
     //{
-    static bool is_implicit(const std::string &name);
+    EXPORT static bool is_implicit(const std::string &name);
     bool is_implicit() const {
         return is_implicit(name());
     }
     //}
 
     /** Return the argument index for a placeholder argument given its
-     *  name. Returns 0 for _0, 1 for _1, etc. Returns -1 if
+     *  name. Returns 0 for \ref _0, 1 for \ref _1, etc. Returns -1 if
      *  the variable is not of implicit form.
      */
     //{
@@ -144,7 +134,7 @@ public:
     }
     //}
 
-    /** Test if a var is the placeholder variable _ */
+    /** Test if a var is the placeholder variable \ref _ */
     //{
     static bool is_placeholder(const std::string &name) {
         return name == "_";
@@ -155,59 +145,35 @@ public:
     //}
 
     /** A Var can be treated as an Expr of type Int(32) */
-    operator const Expr &() const {
-        return e;
+    operator Expr() const {
+        return Internal::Variable::make(Int(32), name());
     }
+
+    /** Vars to use for scheduling producer/consumer pairs on the gpu. Deprecated. */
+    // @{
+    static Var gpu_blocks() {
+        return Var("__deprecated_block_id_x");
+    }
+    static Var gpu_threads() {
+        return Var("__deprecated_thread_id_x");
+    }
+    // @}
 
     /** A Var that represents the location outside the outermost loop. */
     static Var outermost() {
         return Var("__outermost");
     }
+
 };
 
-template<int N = -1>
-struct ImplicitVar {
-    Var to_var() const {
-        if (N >= 0) {
-            return Var::implicit(N);
-        } else {
-            return Var("_");
-        }
-    }
-
-    operator Var() const {
-        return to_var();
-    }
-    operator Expr() const {
-        return to_var();
-    }
-};
-
-/** A placeholder variable for inferred arguments. See \ref Var::implicit */
-static constexpr ImplicitVar<> _;
+/** A placeholder variable for infered arguments. See \ref Var::implicit */
+EXPORT extern Var _;
 
 /** The first ten implicit Vars for use in scheduling. See \ref Var::implicit */
 // @{
-static constexpr ImplicitVar<0> _0;
-static constexpr ImplicitVar<1> _1;
-static constexpr ImplicitVar<2> _2;
-static constexpr ImplicitVar<3> _3;
-static constexpr ImplicitVar<4> _4;
-static constexpr ImplicitVar<5> _5;
-static constexpr ImplicitVar<6> _6;
-static constexpr ImplicitVar<7> _7;
-static constexpr ImplicitVar<8> _8;
-static constexpr ImplicitVar<9> _9;
+EXPORT extern Var _0, _1, _2, _3, _4, _5, _6, _7, _8, _9;
 // @}
 
-namespace Internal {
-
-/** Make a list of unique arguments for definitions with unnamed
-    arguments. */
-std::vector<Var> make_argument_list(int dimensionality);
-
-}  // namespace Internal
-
-}  // namespace Halide
+}
 
 #endif

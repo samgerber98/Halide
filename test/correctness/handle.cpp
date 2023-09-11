@@ -3,9 +3,16 @@
 
 using namespace Halide;
 
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 // Make a custom strlen so that it always returns a 32-bit int,
 // instead of switching based on bit-width.
-extern "C" HALIDE_EXPORT_SYMBOL int my_strlen(const char *c) {
+extern "C" DLLEXPORT
+int my_strlen(const char *c) {
     int l = 0;
     while (*c) {
         c++;
@@ -17,11 +24,6 @@ extern "C" HALIDE_EXPORT_SYMBOL int my_strlen(const char *c) {
 HalideExtern_1(int, my_strlen, const char *);
 
 int main(int argc, char **argv) {
-    if (get_jit_target_from_environment().arch == Target::WebAssembly) {
-        printf("[SKIP] WebAssembly JIT does not support Param<> for pointer types.\n");
-        return 0;
-    }
-
     // Check we can pass a Handle through to an extern function.
     {
         const char *c_message = "Hello, world!";
@@ -35,7 +37,7 @@ int main(int argc, char **argv) {
         if (result != correct) {
             printf("strlen(%s) -> %d instead of %d\n",
                    c_message, result, correct);
-            return 1;
+            return -1;
         }
     }
 
@@ -50,7 +52,7 @@ int main(int argc, char **argv) {
         g.compute_root();
         h(x) = g(x);
 
-        Buffer<char *> im = h.realize({100});
+        Buffer<char *> im = h.realize(100);
 
         uint64_t handle = (uint64_t)(im(0));
         if (sizeof(char *) == 4) {
@@ -62,18 +64,18 @@ int main(int argc, char **argv) {
         // As another sanity check, the internal pointer to the string constant should be aligned.
         if (handle & 0x3) {
             printf("Got handle: %llx. A handle should be aligned to at least four bytes\n", (long long)handle);
-            return 1;
+            return -1;
         }
 
         for (int i = 0; i < im.width(); i++) {
             if (im(i) != im(0)) {
                 printf("im(%d) = %p instead of %p\n",
                        i, im(i), im(0));
-                return 1;
+                return -1;
             }
             if (std::string(im(i)) != msg) {
                 printf("Handle was %s instead of %s\n", im(i), msg.c_str());
-                return 1;
+                return -1;
             }
         }
     }

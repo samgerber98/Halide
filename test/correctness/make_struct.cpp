@@ -11,13 +11,19 @@ struct struct_t {
     const char *d;
 };
 
-extern "C" HALIDE_EXPORT_SYMBOL int check_struct(struct_t *s) {
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
+extern "C" DLLEXPORT int check_struct(struct_t *s) {
     if (s->a != 3.0 ||
         s->b != 1234567 ||
         s->c != 1234 ||
         strcmp(s->d, "Test global string\n")) {
         printf("Unexpected struct values: %f %d %d %s\n", s->a, s->b, s->c, s->d);
-        exit(1);
+        exit(-1);
     }
     return 0;
 }
@@ -25,11 +31,6 @@ extern "C" HALIDE_EXPORT_SYMBOL int check_struct(struct_t *s) {
 HalideExtern_1(int, check_struct, struct_t *);
 
 int main(int argc, char **argv) {
-    if (get_jit_target_from_environment().arch == Target::WebAssembly) {
-        printf("[SKIP] Skipping test for WebAssembly as the wasm JIT cannot support passing arbitrary pointers to/from HalideExtern code.\n");
-        return 0;
-    }
-
     // Check make_struct is working. make_struct is not intended to be
     // called from the front-end because the structs live on the stack
     // of the generated function. The generated structs should also

@@ -13,19 +13,26 @@ using namespace Halide::Internal;
 class CheckForFloatDivision : public IRMutator {
     using IRMutator::visit;
 
-    Expr visit(const Div *op) override {
+    void visit(const Div *op) {
         if (op->type.is_float() && is_const(op->b)) {
             std::cerr << "Found floating-point division by constant: " << Expr(op) << "\n";
-            exit(1);
+            exit(-1);
+        } else {
+            expr = op;
         }
-        return op;
     }
 };
 
 // A mutator that injects code that counts floating point multiplies,
 // and an extern function that it calls out to for the accounting.
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 int multiply_count = 0;
-extern "C" HALIDE_EXPORT_SYMBOL float record_float_mul(float arg) {
+extern "C" DLLEXPORT float record_float_mul(float arg) {
     multiply_count++;
     return arg;
 }
@@ -34,12 +41,11 @@ HalideExtern_1(float, record_float_mul, float);
 class CountMultiplies : public IRMutator {
     using IRMutator::visit;
 
-    Expr visit(const Mul *op) override {
-        Expr expr = IRMutator::visit(op);
+    void visit(const Mul *op) {
+        IRMutator::visit(op);
         if (op->type.is_float()) {
             expr = record_float_mul(expr);
         }
-        return expr;
     }
 };
 
@@ -52,12 +58,12 @@ int main(int argc, char **argv) {
     f.add_custom_lowering_pass(new CountMultiplies);
 
     const int size = 10;
-    f.realize({size});
+    f.realize(size);
 
     if (multiply_count != size * 2) {
         printf("The multiplies weren't all counted. Got %d instead of %d\n",
                multiply_count, size);
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");

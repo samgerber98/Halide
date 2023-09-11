@@ -1,15 +1,15 @@
-#include "Halide.h"
-#include <limits>
 #include <stdio.h>
 #include <string>
 #include <vector>
+#include <limits>
+#include "Halide.h"
 
 using namespace Halide;
 
 std::vector<std::string> messages;
 
-void my_print(JITUserContext *user_context, const char *message) {
-    // printf("%s", message);
+extern "C" void halide_print(void *user_context, const char *message) {
+    //printf("%s", message);
     messages.push_back(message);
 }
 
@@ -18,18 +18,10 @@ void my_print(JITUserContext *user_context, const char *message) {
 #endif
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.has_feature(Target::Profile)) {
+    if (get_jit_target_from_environment().has_feature(Target::Profile)) {
         // The profiler adds lots of extra prints, so counting the
         // number of prints is not useful.
-        printf("[SKIP] Test incompatible with profiler.\n");
-        return 0;
-    }
-
-    if (target.has_feature(Target::Debug)) {
-        // Same thing here: the runtime debug adds lots of extra prints,
-        // so counting the number of prints is not useful.
-        printf("[SKIP] Test incompatible with debug runtime.\n");
+        printf("Skipping test because profiler is active\n");
         return 0;
     }
 
@@ -39,12 +31,12 @@ int main(int argc, char **argv) {
         Func f;
 
         f(x) = print(x * x, "the answer is", 42.0f, "unsigned", cast<uint32_t>(145));
-        f.jit_handlers().custom_print = my_print;
-        Buffer<int32_t> result = f.realize({10});
+        f.set_custom_print(halide_print);
+        Buffer<int32_t> result = f.realize(10);
 
         for (int32_t i = 0; i < 10; i++) {
             if (result(i) != i * i) {
-                return 1;
+                return -1;
             }
         }
 
@@ -72,12 +64,12 @@ int main(int argc, char **argv) {
 
         // Test a string containing a printf format specifier (It should print it as-is).
         f(x) = print_when(x == 3, x * x, "g", 42.0f, "%s", param);
-        f.jit_handlers().custom_print = my_print;
-        Buffer<int32_t> result = f.realize({10});
+        f.set_custom_print(halide_print);
+        Buffer<int32_t> result = f.realize(10);
 
         for (int32_t i = 0; i < 10; i++) {
             if (result(i) != i * i) {
-                return 1;
+                return -1;
             }
         }
 
@@ -92,6 +84,7 @@ int main(int argc, char **argv) {
         assert(nine == 9);
         assert(forty_two == 42.0f);
         assert(p == 127);
+
     }
 
     messages.clear();
@@ -108,18 +101,18 @@ int main(int argc, char **argv) {
             n *= n;
             n *= n;
             n += 100;
-            uint64_t hi = n >> 32;
-            uint64_t lo = n & 0xffffffff;
-            args.push_back((Expr(hi) << 32) | Expr(lo));
+            int32_t hi = n >> 32;
+            int32_t lo = n & 0xffffffff;
+            args.push_back((cast<uint64_t>(hi) << 32) | lo);
             Expr dn = cast<double>((float)(n));
             args.push_back(dn);
         }
         f(x) = print(args);
-        f.jit_handlers().custom_print = my_print;
-        Buffer<uint64_t> result = f.realize({1});
+        f.set_custom_print(halide_print);
+        Buffer<uint64_t> result = f.realize(1);
 
         if (result(0) != 100) {
-            return 1;
+            return -1;
         }
 
         assert(messages.back().size() == 8191);
@@ -130,12 +123,12 @@ int main(int argc, char **argv) {
     // Check that Halide's stringification of floats and doubles
     // matches %f and %e respectively.
 
-#ifndef _WIN32
+    #ifndef _WIN32
     // msvc's library has different ideas about how %f and %e should come out.
     {
         Func f, g;
 
-        const int N = 100000;
+        const int N = 1000000;
 
         Expr e = reinterpret(Float(32), random_uint());
         // Make sure we cover some special values.
@@ -157,8 +150,8 @@ int main(int argc, char **argv) {
 
         f(x) = print(e);
 
-        f.jit_handlers().custom_print = my_print;
-        Buffer<float> imf = f.realize({N});
+        f.set_custom_print(halide_print);
+        Buffer<float> imf = f.realize(N);
 
         assert(messages.size() == (size_t)N);
 
@@ -173,15 +166,15 @@ int main(int argc, char **argv) {
             if (!strcmp(correct, "-nan\n")) strcpy(correct, "nan\n");
             if (messages[i] != correct) {
                 printf("float %d: %s vs %s for %10.20e\n", i, messages[i].c_str(), correct, imf(i));
-                return 1;
+                return -1;
             }
         }
 
         messages.clear();
 
         g(x) = print(reinterpret(Float(64), (cast<uint64_t>(random_uint()) << 32) | random_uint()));
-        g.jit_handlers().custom_print = my_print;
-        Buffer<double> img = g.realize({N});
+        g.set_custom_print(halide_print);
+        Buffer<double> img = g.realize(N);
 
         assert(messages.size() == (size_t)N);
 
@@ -195,61 +188,14 @@ int main(int argc, char **argv) {
             if (!strcmp(correct, "-nan\n")) strcpy(correct, "nan\n");
             if (messages[i] != correct) {
                 printf("double %d: %s vs %s for %10.20e\n", i, messages[i].c_str(), correct, img(i));
-                return 1;
+                return -1;
             }
         }
+
+
     }
-#endif
+    #endif
 
-    messages.clear();
-
-    {
-        Func f;
-
-        // Test a vectorized print.
-        f(x) = print(x * 3);
-        f.jit_handlers().custom_print = my_print;
-        f.vectorize(x, 32);
-        if (target.has_feature(Target::HVX)) {
-            f.hexagon();
-        }
-        Buffer<int> result = f.realize({128});
-
-        if (!target.has_feature(Target::HVX)) {
-            assert((int)messages.size() == result.width());
-            for (size_t i = 0; i < messages.size(); i++) {
-                assert(messages[i] == std::to_string(i * 3) + "\n");
-            }
-        } else {
-            // The Hexagon simulator prints directly to stderr, so we
-            // can't read the messages.
-        }
-    }
-
-    messages.clear();
-
-    {
-        Func f;
-
-        // Test a vectorized print_when.
-        f(x) = print_when(x % 2 == 0, x * 3);
-        f.jit_handlers().custom_print = my_print;
-        f.vectorize(x, 32);
-        if (target.has_feature(Target::HVX)) {
-            f.hexagon();
-        }
-        Buffer<int> result = f.realize({128});
-
-        if (!target.has_feature(Target::HVX)) {
-            assert((int)messages.size() == result.width() / 2);
-            for (size_t i = 0; i < messages.size(); i++) {
-                assert(messages[i] == std::to_string(i * 2 * 3) + "\n");
-            }
-        } else {
-            // The Hexagon simulator prints directly to stderr, so we
-            // can't read the messages.
-        }
-    }
 
     printf("Success!\n");
     return 0;

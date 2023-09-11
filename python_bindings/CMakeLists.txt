@@ -1,107 +1,95 @@
-cmake_minimum_required(VERSION 3.22...3.23)
-project(Halide_Python)
 
-include(CMakeDependentOption)
+project(PyHalide)
+cmake_minimum_required(VERSION 3.0) # for up-to-date FindPythonLibs.cmake
+set( CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR} )
 
-##
-# Project options
-##
+# Find Python and boost python
+if(USE_PYTHON EQUAL 2)
+	find_package(PythonInterp 2.7 REQUIRED)
+	find_package(PythonLibs 2.7 REQUIRED)
+	find_package(NumPy REQUIRED)
+	if (NOT USE_EXTERNAL_BOOST)
+		find_package(Boost COMPONENTS python REQUIRED)
+	endif()
+	find_package(Halide REQUIRED)
+else()
+	find_package(PythonInterp 3.4 REQUIRED)
+	find_package(PythonLibs 3.4 REQUIRED)
+	find_package(NumPy REQUIRED)
+	if (NOT USE_EXTERNAL_BOOST)
+		string( REGEX REPLACE "([0-9]+).([0-9]+).[0-9.]+" "\\1\\2" PYTHON_CONCAT_VERSION_STRING ${PYTHON_VERSION_STRING} )
+		find_package(Boost COMPONENTS python-py${PYTHON_CONCAT_VERSION_STRING})
+		if(NOT Boost_FOUND)
+			find_package(Boost COMPONENTS python3 REQUIRED)
+		endif()
+	endif()
+	find_package(Halide REQUIRED)
+endif()
 
-# Preferred defaults for built-in options
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "The minimum C++ standard to use")
-option(CMAKE_CXX_STANDARD_REQUIRED "Prevent CMake C++ standard selection decay" ON)
-option(CMAKE_CXX_EXTENSIONS "Enable C++ vendor extensions (e.g. GNU)" OFF)
+option(USE_BOOST_NUMPY "Use Boost.Numpy dependency instead of Halide.Numpy" OFF)
 
-# Duplicated options from parent project
-option(WITH_TESTS "Build tests" ON)
-option(WITH_TUTORIALS "Build tutorials" ON)
-option(WITH_PYTHON_STUBS "Build Python stubs" ON)
 
-# Enable/disable testing
-cmake_dependent_option(
-    WITH_TEST_PYTHON "Build Python tests" ON
-    WITH_TESTS OFF
+if(USE_BOOST_NUMPY)
+add_definitions( -DUSE_BOOST_NUMPY )
+set(BoostNumpy_INCLUDE_DIRS "")
+set(BoostNumpy_LIBRARY_DIR "")
+set(BoostNumpy_LIBRARIES boost_numpy)
+else()
+#(NOT USE_BOOST_NUMPY) is true
+
+file(GLOB MicroNumpyCpp
+numpy/*.cpp
+numpy/*.hpp
 )
 
-# Set the expected (downloaded) version of pybind11
-option(PYBIND11_USE_FETCHCONTENT "Enable to download pybind11 via FetchContent" ON)
-set(PYBIND11_VER 2.10.4 CACHE STRING "The pybind11 version to use (or download)")
+add_library(halide_numpy STATIC ${MicroNumpyCpp})
+target_link_libraries(halide_numpy ${Boost_LIBRARIES} ${PYTHON_LIBRARIES} ${NumPy_LIBRARIES})
+set_property(TARGET halide_numpy PROPERTY POSITION_INDEPENDENT_CODE TRUE)
 
-##
-# Dependencies
-##
+set(BoostNumpy_INCLUDE_DIRS ./numpy)
+set(BoostNumpy_LIBRARY_DIR ./numpy)
+set(BoostNumpy_LIBRARIES halide_numpy)
+endif()
 
-# The plain Development component is the same as requesting both
-# Development.Module and Development.Embed. We don't need the Embed
-# part, so only requesting Module avoids failures when Embed is not
-# available, as is the case in the manylinux Docker images.
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
-if (Python3_VERSION VERSION_LESS "3.8")
-    message(FATAL_ERROR "Halide requires Python v3.8 or later, but found ${Python3_VERSION}.")
-endif ()
-message(STATUS "Found Python ${Python3_VERSION} at ${Python3_EXECUTABLE}")
+add_definitions("-std=c++11")
 
-if (PYBIND11_USE_FETCHCONTENT)
-    include(FetchContent)
-    FetchContent_Declare(
-        pybind11
-        GIT_REPOSITORY https://github.com/pybind/pybind11.git
-        GIT_TAG v${PYBIND11_VER}
-    )
-    FetchContent_MakeAvailable(pybind11)
-else ()
-    find_package(pybind11 ${PYBIND11_VER} REQUIRED)
-endif ()
+include_directories(
+  ${HALIDE_INCLUDE_DIR}
+  ${Boost_INCLUDE_DIRS}
+  ${BoostNumpy_INCLUDE_DIRS}
+  ${PYTHON_INCLUDE_DIRS}
+  ${NUMPY_INCLUDE_DIRS}
+)
 
-find_package(Halide REQUIRED Halide)
-if (NOT Halide_ENABLE_RTTI OR NOT Halide_ENABLE_EXCEPTIONS)
-    message(FATAL_ERROR "Python bindings require RTTI and exceptions to be enabled.")
-endif ()
-
-##
-# A helper for creating tests with correct PYTHONPATH and sanitizer preloading
-##
-
-function(add_python_test)
-    cmake_parse_arguments(ARG "" "FILE;LABEL" "PYTHONPATH;ENVIRONMENT;TEST_ARGS" ${ARGN})
-
-    list(PREPEND ARG_PYTHONPATH "$<TARGET_FILE_DIR:Halide::Python>/..")
-    list(TRANSFORM ARG_PYTHONPATH PREPEND "PYTHONPATH=path_list_prepend:")
-
-    list(PREPEND ARG_ENVIRONMENT "HL_TARGET=${Halide_TARGET}")
-
-    cmake_path(GET ARG_FILE STEM test_name)
-    set(test_name "${ARG_LABEL}_${test_name}")
-
-    add_test(
-        NAME "${test_name}"
-        COMMAND ${Halide_PYTHON_LAUNCHER} "$<TARGET_FILE:Python3::Interpreter>" "$<SHELL_PATH:${CMAKE_CURRENT_SOURCE_DIR}/${ARG_FILE}>" ${ARG_TEST_ARGS}
-    )
-    set_tests_properties(
-        "${test_name}"
-        PROPERTIES
-        LABELS "python"
-        ENVIRONMENT "${ARG_ENVIRONMENT}"
-        ENVIRONMENT_MODIFICATION "${ARG_PYTHONPATH}"
-    )
-endfunction()
+link_directories(
+  ../build/lib
+  ${HALIDE_ROOT_DIR}/lib
+  ${Boost_LIBRARY_DIRS}
+  ${BoostNumpy_LIBRARY_DIR}
+  ${Numpy_LIBRARY_DIR}
+)
 
 
-##
-# Add our sources to this sub-tree.
-##
+if(FALSE AND UNIX )
+	# Disable the pointer-to-function and pointer-to-object warnings
+	add_definitions( -Wno-unused-local-typedefs )
+	set_property(SOURCE util.cpp PROPERTY COMPILE_FLAGS -w )
+endif()
 
-add_subdirectory(src)
+file(GLOB SrcCpp
+python/*.cpp
+../src/OutputImageParam.cpp
+../src/ImageParam.cpp)
 
-if (WITH_PYTHON_STUBS)
-    add_subdirectory(stub)
-endif ()
+add_library(halide SHARED ${SrcCpp})
+target_link_libraries(halide
+  ${HALIDE_LIBRARIES}
+  ${Boost_LIBRARIES}
+  ${BoostNumpy_LIBRARIES}
+  ${PYTHON_LIBRARIES}
+)
 
-if (WITH_TEST_PYTHON)
-    add_subdirectory(apps)
-    add_subdirectory(test)
-endif ()
-
-if (WITH_TUTORIALS)
-    add_subdirectory(tutorial)
-endif ()
+set_target_properties( halide PROPERTIES PREFIX "")
+if(APPLE)
+set_target_properties( halide PROPERTIES SUFFIX ".so" )
+endif()

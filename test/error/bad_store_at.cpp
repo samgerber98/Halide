@@ -16,8 +16,9 @@ int main(int argc, char **argv) {
     // This makes no sense, because the compute_at level is higher than the store_at level
     f.store_at(h, y).compute_root();
 
-    h.realize({10, 10});
+    h.realize(10, 10);
 
-    printf("Success!\n");
+    printf("I should not have reached here\n");
     return 0;
+
 }

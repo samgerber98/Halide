@@ -1,4 +1,3 @@
-#include "Halide.h"
 
 // This test demonstrates using tracing to give you something like a
 // stack trace in case of a crash (due to a compiler bug, or a bug in
@@ -7,21 +6,20 @@
 
 #if defined(__linux__) || defined(__APPLE__) || defined(__unix) || defined(__posix)
 
+#include "Halide.h"
+#include <stdio.h>
 #include <signal.h>
 #include <stack>
-#include <stdio.h>
 #include <string>
 
 using namespace Halide;
-
-namespace {
-
 using std::stack;
 using std::string;
 
 stack<string> stack_trace;
 
-int my_trace(JITUserContext *user_context, const halide_trace_event_t *e) {
+
+int my_trace(void *user_context, const halide_trace_event_t *e) {
     const string event_types[] = {"Load ",
                                   "Store ",
                                   "Begin realization ",
@@ -61,29 +59,21 @@ void signal_handler(int signum) {
     exit(0);
 }
 
-}  // namespace
 
 int main(int argc, char **argv) {
-#ifdef HALIDE_INTERNAL_USING_ASAN
-    // ASAN also needs to intercept the SIGSEGV signal handler;
-    // we could probably make these work together, but it's
-    // also probably not worth the effort.
-    printf("[SKIP] tracing_stack does not run under ASAN.\n");
-    return 0;
-#endif
 
     signal(SIGSEGV, signal_handler);
     signal(SIGBUS, signal_handler);
 
     // Loads from this image will barf, because we've messed up the host pointer
     Buffer<int> input(100, 100);
-    halide_buffer_t *buf = input.raw_buffer();
+    buffer_t *buf = input.raw_buffer();
     buf->host = (uint8_t *)17;
 
     Func f("f"), g("g"), h("h");
     Var x("x"), y("y");
 
-    f(x, y) = x + y;
+    f(x, y) = x+y;
     f.compute_root().trace_realizations();
 
     g(x, y) = f(x, y) + 37;
@@ -92,11 +82,11 @@ int main(int argc, char **argv) {
     h(x, y) = g(x, y) + input(x, y);
     h.trace_realizations();
 
-    h.jit_handlers().custom_trace = &my_trace;
-    h.realize({100, 100});
+    h.set_custom_trace(&my_trace);
+    h.realize(100, 100);
 
     printf("The code should not have reached this print statement.\n");
-    return 1;
+    return -1;
 }
 
 #else
@@ -104,7 +94,7 @@ int main(int argc, char **argv) {
 #include <stdio.h>
 
 int main(int argc, char **argv) {
-    printf("[SKIP] Test requires UNIX signal handling\n");
+    printf("Test skipped because we're not on a system with UNIX signal handling\n");
     return 0;
 }
 

@@ -1,53 +1,54 @@
-cmake_minimum_required(VERSION 3.22)
-project(c_backend)
+function(halide_add_aot_cpp_dependency TARGET AOT_LIBRARY_TARGET)
+    halide_generator_genfiles_dir(${AOT_LIBRARY_TARGET} GENFILES_DIR)
+    add_dependencies("${TARGET}" "${AOT_LIBRARY_TARGET}.exec_generator")
 
-enable_testing()
-
-# Set up language settings
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED YES)
-set(CMAKE_CXX_EXTENSIONS NO)
-
-# Find Halide
-find_package(Halide REQUIRED)
+    add_library(${AOT_LIBRARY_TARGET}.cpplib STATIC "${GENFILES_DIR}/${AOT_LIBRARY_TARGET}.cpp")
+    target_compile_options(${AOT_LIBRARY_TARGET}.cpplib PRIVATE "-std=c++11")
+    target_link_libraries("${TARGET}" PRIVATE ${AOT_LIBRARY_TARGET}.cpplib)
+    target_include_directories("${TARGET}" PRIVATE "${GENFILES_DIR}")
+endfunction(halide_add_aot_cpp_dependency)
 
 # Generator(s)
-add_halide_generator(pipeline.generator SOURCES pipeline_generator.cpp)
+halide_add_generator(pipeline.generator
+                     SRCS pipeline_generator.cpp)
+halide_add_aot_library(pipeline_c
+                       GENERATOR_TARGET pipeline.generator
+                       GENERATED_FUNCTION pipeline_c
+                       GENERATOR_OUTPUTS cpp h
+                       GENERATOR_ARGS target=host)
 
-add_halide_library(pipeline_c FROM pipeline.generator
-                   C_BACKEND
-                   GENERATOR pipeline)
-add_halide_library(pipeline_native FROM pipeline.generator
-                   GENERATOR pipeline)
+halide_add_aot_library(pipeline_native
+                       GENERATOR_TARGET pipeline.generator
+                       GENERATED_FUNCTION pipeline_native
+                       GENERATOR_OUTPUTS static_library h
+                       GENERATOR_ARGS target=host)
 
-add_halide_generator(pipeline_cpp.generator SOURCES pipeline_cpp_generator.cpp)
-
-add_halide_library(pipeline_cpp_cpp FROM pipeline_cpp.generator
-                   C_BACKEND
-                   GENERATOR pipeline_cpp
-                   FEATURES c_plus_plus_name_mangling)
-add_halide_library(pipeline_cpp_native FROM pipeline_cpp.generator
-                   GENERATOR pipeline_cpp
-                   FEATURES c_plus_plus_name_mangling)
+halide_add_generator(pipeline_cpp.generator
+                     SRCS pipeline_cpp_generator.cpp)
+halide_add_aot_library(pipeline_cpp_cpp
+                       GENERATOR_TARGET pipeline_cpp.generator
+                       GENERATED_FUNCTION pipeline_cpp_cpp
+                       GENERATOR_OUTPUTS cpp h
+                       GENERATOR_ARGS target=host-c_plus_plus_name_mangling)
+halide_add_aot_library(pipeline_cpp_native
+                       GENERATOR_TARGET pipeline_cpp.generator
+                       GENERATED_FUNCTION pipeline_cpp_native
+                       GENERATOR_OUTPUTS static_library h
+                       GENERATOR_ARGS target=host-c_plus_plus_name_mangling)
 
 # Final executable(s)
 add_executable(run_c_backend_and_native run.cpp)
-target_link_libraries(run_c_backend_and_native
-                      PRIVATE
-                      pipeline_native
-                      pipeline_c)
+target_compile_options(run_c_backend_and_native PRIVATE "-std=c++11")
+halide_add_aot_cpp_dependency(run_c_backend_and_native pipeline_c)
+halide_add_aot_library_dependency(run_c_backend_and_native pipeline_native)
 
 add_executable(run_c_backend_and_native_cpp run_cpp.cpp)
-target_link_libraries(run_c_backend_and_native_cpp
-                      PRIVATE
-                      pipeline_cpp_native
-                      pipeline_cpp_cpp)
+target_compile_options(run_c_backend_and_native_cpp PRIVATE "-std=c++11")
+halide_add_aot_cpp_dependency(run_c_backend_and_native_cpp pipeline_cpp_cpp)
+halide_add_aot_library_dependency(run_c_backend_and_native_cpp pipeline_cpp_native)
 
-# Test that the app actually works!
-add_test(NAME c_backend COMMAND run_c_backend_and_native)
-add_test(NAME c_backend_cpp COMMAND run_c_backend_and_native_cpp)
 
-set_tests_properties(c_backend c_backend_cpp PROPERTIES
-                     LABELS c_backend
-                     PASS_REGULAR_EXPRESSION "Success!"
-                     SKIP_REGULAR_EXPRESSION "\\[SKIP\\]")
+
+
+
+

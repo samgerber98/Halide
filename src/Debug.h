@@ -5,38 +5,36 @@
  * Defines functions for debug logging during code generation.
  */
 
-#include <cstdlib>
 #include <iostream>
 #include <string>
+#include <stdlib.h>
+
+#include "Introspection.h"
 
 namespace Halide {
 
 struct Expr;
 struct Type;
 // Forward declare some things from IRPrinter, which we can't include yet.
-std::ostream &operator<<(std::ostream &stream, const Expr &);
-std::ostream &operator<<(std::ostream &stream, const Type &);
+EXPORT std::ostream &operator<<(std::ostream &stream, const Expr &);
+EXPORT std::ostream &operator<<(std::ostream &stream, const Type &);
 
 class Module;
-std::ostream &operator<<(std::ostream &stream, const Module &);
-
-struct Target;
-/** Emit a halide Target in a human readable form */
-std::ostream &operator<<(std::ostream &stream, const Target &);
+EXPORT std::ostream &operator<<(std::ostream &stream, const Module &);
 
 namespace Internal {
 
 struct Stmt;
-std::ostream &operator<<(std::ostream &stream, const Stmt &);
+EXPORT std::ostream &operator<<(std::ostream &stream, const Stmt &);
 
 struct LoweredFunc;
-std::ostream &operator<<(std::ostream &, const LoweredFunc &);
+EXPORT std::ostream &operator << (std::ostream &, const LoweredFunc &);
 
 /** For optional debugging during codegen, use the debug class as
  * follows:
  *
  \code
- debug(verbosity) << "The expression is " << expr << "\n";
+ debug(verbosity) << "The expression is " << expr << std::endl;
  \endcode
  *
  * verbosity of 0 always prints, 1 should print after every major
@@ -50,22 +48,20 @@ class debug {
     const bool logging;
 
 public:
-    debug(int verbosity)
-        : logging(verbosity <= debug_level()) {
-    }
+    debug(int verbosity) : logging(verbosity <= debug_level()) {}
 
     template<typename T>
-    debug &operator<<(T &&x) {
+    debug &operator<<(T&& x) {
         if (logging) {
             std::cerr << std::forward<T>(x);
         }
         return *this;
     }
 
-    static int debug_level();
+    EXPORT static int debug_level();
 };
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

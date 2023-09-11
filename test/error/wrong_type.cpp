@@ -1,16 +1,13 @@
 #include "Halide.h"
-using namespace Halide;
+#include <stdio.h>
 
-#ifdef NDEBUG
-#error "wrong_type requires assertions"
-#endif
+using namespace Halide;
 
 int main(int argc, char **argv) {
     Func f;
     Var x;
     f(x) = x;
-    Buffer<float> im = f.realize({100});
+    Buffer<float> im = f.realize(100);
 
-    printf("Success!\n");
     return 0;
 }

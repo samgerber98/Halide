@@ -1,10 +1,9 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
-#include <algorithm>
 #include <cstdio>
+#include <algorithm>
+#include "benchmark.h"
 
 using namespace Halide;
-using namespace Halide::Tools;
 
 Var x("x"), y("y");
 
@@ -16,29 +15,32 @@ Func bitonic_sort(Func input, int size) {
     for (int pass_size = 1; pass_size < size; pass_size <<= 1) {
         for (int chunk_size = pass_size; chunk_size > 0; chunk_size >>= 1) {
             next = Func("bitonic_pass");
-            Expr chunk_start = (x / (2 * chunk_size)) * (2 * chunk_size);
-            Expr chunk_end = (x / (2 * chunk_size) + 1) * (2 * chunk_size);
+            Expr chunk_start = (x/(2*chunk_size))*(2*chunk_size);
+            Expr chunk_end = (x/(2*chunk_size) + 1)*(2*chunk_size);
             Expr chunk_middle = chunk_start + chunk_size;
             Expr chunk_index = x - chunk_start;
             if (pass_size == chunk_size && pass_size > 1) {
                 // Flipped pass
-                Expr partner = 2 * chunk_middle - x - 1;
+                Expr partner = 2*chunk_middle - x - 1;
                 // We need a clamp here to help out bounds inference
-                partner = clamp(partner, chunk_start, chunk_end - 1);
+                partner = clamp(partner, chunk_start, chunk_end-1);
                 next(x) = select(x < chunk_middle,
                                  min(prev(x), prev(partner)),
                                  max(prev(x), prev(partner)));
+
 
             } else {
                 // Regular pass
-                Expr partner = chunk_start + (chunk_index + chunk_size) % (chunk_size * 2);
+                Expr partner = chunk_start + (chunk_index + chunk_size) % (chunk_size*2);
                 next(x) = select(x < chunk_middle,
                                  min(prev(x), prev(partner)),
                                  max(prev(x), prev(partner)));
+
+
             }
 
             if (pass_size > 1) {
-                next.split(x, xo, xi, 2 * chunk_size);
+                next.split(x, xo, xi, 2*chunk_size);
             }
             if (chunk_size > 128) {
                 next.parallel(xo);
@@ -64,10 +66,10 @@ Func merge_sort(Func input, int total_size) {
     {
         assert(input.dimensions() == 1);
         // Use a small sorting network
-        Expr a0 = input(4 * y);
-        Expr a1 = input(4 * y + 1);
-        Expr a2 = input(4 * y + 2);
-        Expr a3 = input(4 * y + 3);
+        Expr a0 = input(4*y);
+        Expr a1 = input(4*y+1);
+        Expr a2 = input(4*y+2);
+        Expr a3 = input(4*y+3);
 
         Expr b0 = min(a0, a1);
         Expr b1 = max(a0, a1);
@@ -86,7 +88,7 @@ Func merge_sort(Func input, int total_size) {
 
         result(x, y) = select(x == 0, b0,
                               select(x == 1, b1,
-                                     select(x == 2, b2, b3)));
+                                  select(x == 2, b2, b3)));
 
         result.compute_at(parallel_stage, y).bound(x, 0, 4).unroll(x);
 
@@ -100,22 +102,23 @@ Func merge_sort(Func input, int total_size) {
 
         // Merge pairs of rows from the partial result
         Func merge_rows("merge_rows");
-        RDom r(0, chunk_size * 2);
+        RDom r(0, chunk_size*2);
 
         // The first dimension of merge_rows is within the chunk, and the
         // second dimension is the chunk index.  Keeps track of two
         // pointers we're merging from and an output value.
         merge_rows(x, y) = Tuple(0, 0, cast(input.value().type(), 0));
 
-        Expr candidate_a = merge_rows(r - 1, y)[0];
-        Expr candidate_b = merge_rows(r - 1, y)[1];
+        Expr candidate_a = merge_rows(r-1, y)[0];
+        Expr candidate_b = merge_rows(r-1, y)[1];
         Expr valid_a = candidate_a < chunk_size;
         Expr valid_b = candidate_b < chunk_size;
-        Expr value_a = result(clamp(candidate_a, 0, chunk_size - 1), 2 * y);
-        Expr value_b = result(clamp(candidate_b, 0, chunk_size - 1), 2 * y + 1);
-        merge_rows(r, y) = select(valid_a && ((value_a < value_b) || !valid_b),
-                                  Tuple(candidate_a + 1, candidate_b, value_a),
-                                  Tuple(candidate_a, candidate_b + 1, value_b));
+        Expr value_a = result(clamp(candidate_a, 0, chunk_size-1), 2*y);
+        Expr value_b = result(clamp(candidate_b, 0, chunk_size-1), 2*y+1);
+        merge_rows(r, y) = tuple_select(valid_a && ((value_a < value_b) || !valid_b),
+                                        Tuple(candidate_a + 1, candidate_b, value_a),
+                                        Tuple(candidate_a, candidate_b + 1, value_b));
+
 
         if (chunk_size <= parallel_work_size) {
             merge_rows.compute_at(parallel_stage, y);
@@ -137,11 +140,6 @@ Func merge_sort(Func input, int total_size) {
 }
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
 
     const int N = 1 << 10;
 
@@ -158,7 +156,7 @@ int main(int argc, char **argv) {
     printf("Running...\n");
     Buffer<int> bitonic_sorted(N);
     f.realize(bitonic_sorted);
-    double t_bitonic = benchmark([&]() {
+    double t_bitonic = benchmark(1, 10, [&]() {
         f.realize(bitonic_sorted);
     });
 
@@ -169,7 +167,7 @@ int main(int argc, char **argv) {
     printf("Running...\n");
     Buffer<int> merge_sorted(N);
     f.realize(merge_sorted);
-    double t_merge = benchmark([&]() {
+    double t_merge = benchmark(1, 10, [&]() {
         f.realize(merge_sorted);
     });
 
@@ -178,7 +176,7 @@ int main(int argc, char **argv) {
         correct(i) = data(i);
     }
     printf("std::sort...\n");
-    double t_std = benchmark([&]() {
+    double t_std = benchmark(1, 1, [&]() {
         std::sort(&correct(0), &correct(N));
     });
 
@@ -198,14 +196,13 @@ int main(int argc, char **argv) {
     for (int i = 0; i < N; i++) {
         if (bitonic_sorted(i) != correct(i)) {
             printf("bitonic sort failed: %d -> %d instead of %d\n", i, bitonic_sorted(i), correct(i));
-            return 1;
+            return -1;
         }
         if (merge_sorted(i) != correct(i)) {
             printf("merge sort failed: %d -> %d instead of %d\n", i, merge_sorted(i), correct(i));
-            return 1;
+            return -1;
         }
     }
 
-    printf("Success!\n");
     return 0;
 }

@@ -1,131 +1,171 @@
+#include <emmintrin.h>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#ifdef __SSE2__
-#include <emmintrin.h>
-#elif __ARM_NEON
-#include <arm_neon.h>
-#endif
 
+#include "benchmark.h"
 #include "HalideBuffer.h"
-#include "halide_benchmark.h"
 
 using namespace Halide::Runtime;
-using namespace Halide::Tools;
+
+//#define cimg_display 0
+//#include "CImg.h"
+//using namespace cimg_library;
+
+// typedef CImg<uint16_t> Image;
 
 double t;
 
-Buffer<uint16_t, 2> blur(Buffer<uint16_t, 2> in) {
-    Buffer<uint16_t, 2> tmp(in.width() - 8, in.height());
-    Buffer<uint16_t, 2> out(in.width() - 8, in.height() - 2);
+
+Buffer<uint16_t> blur(Buffer<uint16_t> in) {
+    Buffer<uint16_t> tmp(in.width()-8, in.height());
+    Buffer<uint16_t> out(in.width()-8, in.height()-2);
 
     t = benchmark(10, 1, [&]() {
         for (int y = 0; y < tmp.height(); y++)
             for (int x = 0; x < tmp.width(); x++)
-                tmp(x, y) = (in(x, y) + in(x + 1, y) + in(x + 2, y)) / 3;
+                tmp(x, y) = (in(x, y) + in(x+1, y) + in(x+2, y))/3;
 
         for (int y = 0; y < out.height(); y++)
             for (int x = 0; x < out.width(); x++)
-                out(x, y) = (tmp(x, y) + tmp(x, y + 1) + tmp(x, y + 2)) / 3;
+                out(x, y) = (tmp(x, y) + tmp(x, y+1) + tmp(x, y+2))/3;
     });
 
     return out;
 }
 
-Buffer<uint16_t, 2> blur_fast(Buffer<uint16_t, 2> in) {
-    Buffer<uint16_t, 2> out(in.width() - 8, in.height() - 2);
+
+Buffer<uint16_t> blur_fast(Buffer<uint16_t> in) {
+    Buffer<uint16_t> out(in.width()-8, in.height()-2);
 
     t = benchmark(10, 1, [&]() {
-#ifdef __SSE2__
         __m128i one_third = _mm_set1_epi16(21846);
 #pragma omp parallel for
         for (int yTile = 0; yTile < out.height(); yTile += 32) {
-            __m128i tmp[(128 / 8) * (32 + 2)];
+            __m128i a, b, c, sum, avg;
+            __m128i tmp[(128/8) * (32 + 2)];
             for (int xTile = 0; xTile < out.width(); xTile += 128) {
                 __m128i *tmpPtr = tmp;
-                for (int y = 0; y < 32 + 2; y++) {
-                    const uint16_t *inPtr = &(in(xTile, yTile + y));
+                for (int y = 0; y < 32+2; y++) {
+                    const uint16_t *inPtr = &(in(xTile, yTile+y));
                     for (int x = 0; x < 128; x += 8) {
-                        __m128i a = _mm_load_si128((const __m128i *)(inPtr));
-                        __m128i b = _mm_loadu_si128((const __m128i *)(inPtr + 1));
-                        __m128i c = _mm_loadu_si128((const __m128i *)(inPtr + 2));
-                        __m128i sum = _mm_add_epi16(_mm_add_epi16(a, b), c);
-                        __m128i avg = _mm_mulhi_epi16(sum, one_third);
+                        a = _mm_load_si128((const __m128i*)(inPtr));
+                        b = _mm_loadu_si128((const __m128i*)(inPtr+1));
+                        c = _mm_loadu_si128((const __m128i*)(inPtr+2));
+                        sum = _mm_add_epi16(_mm_add_epi16(a, b), c);
+                        avg = _mm_mulhi_epi16(sum, one_third);
                         _mm_store_si128(tmpPtr++, avg);
-                        inPtr += 8;
+                        inPtr+=8;
                     }
                 }
                 tmpPtr = tmp;
                 for (int y = 0; y < 32; y++) {
-                    __m128i *outPtr = (__m128i *)(&(out(xTile, yTile + y)));
+                    __m128i *outPtr = (__m128i *)(&(out(xTile, yTile+y)));
                     for (int x = 0; x < 128; x += 8) {
-                        __m128i a = _mm_load_si128(tmpPtr + (2 * 128) / 8);
-                        __m128i b = _mm_load_si128(tmpPtr + 128 / 8);
-                        __m128i c = _mm_load_si128(tmpPtr++);
-                        __m128i sum = _mm_add_epi16(_mm_add_epi16(a, b), c);
-                        __m128i avg = _mm_mulhi_epi16(sum, one_third);
+                        a = _mm_load_si128(tmpPtr+(2*128)/8);
+                        b = _mm_load_si128(tmpPtr+128/8);
+                        c = _mm_load_si128(tmpPtr++);
+                        sum = _mm_add_epi16(_mm_add_epi16(a, b), c);
+                        avg = _mm_mulhi_epi16(sum, one_third);
                         _mm_store_si128(outPtr++, avg);
                     }
                 }
             }
         }
-#elif __ARM_NEON
-            uint16x4_t one_third = vdup_n_u16(21846);
+    });
+
+    return out;
+}
+
+/*
+  Image blur_fast(const Image &in) {
+  Image out(in.width(), in.height());
+
+  __m128i one_third = _mm_set1_epi16(21846);
+  #pragma omp parallel for
+  for (int yTile = 0; yTile < in.height(); yTile += 64) {
+  __m128i tmp[(64/8)*(64+2)];
+  for (int xTile = 0; xTile < in.width(); xTile += 64) {
+  __m128i *tmpPtr = tmp;
+  for (int y = -1; y < 64+1; y++) {
+  const uint16_t *inPtr = &(in(xTile, yTile+y));
+  for (int x = 0; x < 64; x += 8) {
+  __m128i val = _mm_loadu_si128((__m128i *)(inPtr-1));
+  val = _mm_add_epi16(val, _mm_load_si128((__m128i *)inPtr));
+  val = _mm_add_epi16(val, _mm_loadu_si128((__m128i *)(inPtr+1)));
+  val = _mm_mulhi_epi16(val, one_third);
+  _mm_store_si128(tmpPtr++, val);
+  inPtr += 8;
+  }
+  }
+  tmpPtr = tmp;
+  for (int y = 0; y < 64; y++) {
+  __m128i *outPtr = (__m128i *)(&(out(xTile, yTile+y)));
+  for (int x = 0; x < 64; x += 8) {
+  __m128i val = _mm_load_si128(tmpPtr);
+  val = _mm_add_epi16(val, _mm_load_si128(tmpPtr+64/8));
+  val = _mm_add_epi16(val, _mm_load_si128(tmpPtr+(2*64)/8));
+  val = _mm_mulhi_epi16(val, one_third);
+  _mm_store_si128(outPtr++, val);
+  tmpPtr++;
+  }
+  }
+  }
+  }
+
+  return out;
+  }
+*/
+
+
+Buffer<uint16_t> blur_fast2(const Buffer<uint16_t> &in) {
+    Buffer<uint16_t> out(in.width()-8, in.height()-2);
+
+    int vw = in.width()/8;
+    if (vw > 1024) {
+        printf("Image too large for constant-sized stack allocation\n");
+        return out;
+    }
+
+    t = benchmark(10, 1, [&]() {
+        // multiplying by 21846 then taking the top 16 bits is equivalent to
+        // dividing by three
+        __m128i one_third = _mm_set1_epi16(21846);
+
 #pragma omp parallel for
-            for (int yTile = 0; yTile < out.height(); yTile += 32) {
-                uint16x8_t tmp[(128 / 8) * (32 + 2)];
-                for (int xTile = 0; xTile < out.width(); xTile += 128) {
-                    uint16_t *tmpPtr = (uint16_t *)tmp;
-                    for (int y = 0; y < 32 + 2; y++) {
-                        const uint16_t *inPtr = &(in(xTile, yTile + y));
-                        for (int x = 0; x < 128; x += 8) {
-                            uint16x8_t a = vld1q_u16(inPtr);
-                            uint16x8_t b = vld1q_u16(inPtr + 1);
-                            uint16x8_t c = vld1q_u16(inPtr + 2);
-                            uint16x8_t sum = vaddq_u16(vaddq_u16(a, b), c);
-                            uint16x4_t sumlo = vget_low_u16(sum);
-                            uint16x4_t sumhi = vget_high_u16(sum);
-                            uint16x4_t avglo = vshrn_n_u32(vmull_u16(sumlo, one_third), 16);
-                            uint16x4_t avghi = vshrn_n_u32(vmull_u16(sumhi, one_third), 16);
-                            uint16x8_t avg = vcombine_u16(avglo, avghi);
-                            vst1q_u16(tmpPtr, avg);
-                            tmpPtr += 8;
-                            inPtr += 8;
-                        }
+        for (int yTile = 0; yTile < in.height(); yTile += 128) {
+            __m128i tmp[1024*4]; // four scanlines
+            for (int y = -2; y < 128; y++) {
+                // to produce this scanline of the output
+                __m128i *outPtr = (__m128i *)(&(out(0, yTile + y)));
+                // we use this scanline of the input
+                const uint16_t *inPtr = &(in(0, yTile + y + 2));
+                // and these scanlines of the intermediate result
+                // We start y at negative 2 to fill the tmp buffer
+                __m128i *tmpPtr0 = tmp + ((y+4) & 3) * vw;
+                __m128i *tmpPtr1 = tmp + ((y+3) & 3) * vw;
+                __m128i *tmpPtr2 = tmp + ((y+2) & 3) * vw;
+                for (int x = 0; x < vw; x++) {
+                    // blur horizontally to produce next scanline of tmp
+                    __m128i val = _mm_load_si128((const __m128i *)(inPtr));
+                    val = _mm_add_epi16(val, _mm_loadu_si128((const __m128i *)(inPtr+1)));
+                    val = _mm_add_epi16(val, _mm_loadu_si128((const __m128i *)(inPtr+2)));
+                    val = _mm_mulhi_epi16(val, one_third);
+                    _mm_store_si128(tmpPtr0++, val);
+
+                    // blur vertically using previous scanlines of tmp to produce output
+                    if (y >= 0) {
+                        val = _mm_add_epi16(val, _mm_load_si128(tmpPtr1++));
+                        val = _mm_add_epi16(val, _mm_load_si128(tmpPtr2++));
+                        val = _mm_mulhi_epi16(val, one_third);
+                        _mm_store_si128(outPtr++, val);
                     }
-                    tmpPtr = (uint16_t *)tmp;
-                    for (int y = 0; y < 32; y++) {
-                        uint16_t *outPtr = &(out(xTile, yTile + y));
-                        for (int x = 0; x < 128; x += 8) {
-                            uint16x8_t a = vld1q_u16(tmpPtr + (2 * 128));
-                            uint16x8_t b = vld1q_u16(tmpPtr + 128);
-                            uint16x8_t c = vld1q_u16(tmpPtr);
-                            uint16x8_t sum = vaddq_u16(vaddq_u16(a, b), c);
-                            uint16x4_t sumlo = vget_low_u16(sum);
-                            uint16x4_t sumhi = vget_high_u16(sum);
-                            uint16x4_t avglo = vshrn_n_u32(vmull_u16(sumlo, one_third), 16);
-                            uint16x4_t avghi = vshrn_n_u32(vmull_u16(sumhi, one_third), 16);
-                            uint16x8_t avg = vcombine_u16(avglo, avghi);
-                            vst1q_u16(outPtr, avg);
-                            tmpPtr += 8;
-                            outPtr += 8;
-                        }
-                    }
+
+                    inPtr += 8;
                 }
             }
-#else
-            // No intrinsics enabled, do a naive thing.
-            for (int y = 0; y < out.height(); y++) {
-                for (int x = 0; x < out.width(); x++) {
-                    int tmp[3] = {
-                        (in(x, y) + in(x + 1, y) + in(x + 2, y)) / 3,
-                        (in(x, y + 1) + in(x + 1, y + 1) + in(x + 2, y + 1)) / 3,
-                        (in(x, y + 2) + in(x + 1, y + 2) + in(x + 2, y + 2)) / 3,
-                    };
-                    out(x, y) = (tmp[0] + tmp[1] + tmp[2]) / 3;
-                }
-            }
-#endif
+        }
+
     });
 
     return out;
@@ -133,8 +173,8 @@ Buffer<uint16_t, 2> blur_fast(Buffer<uint16_t, 2> in) {
 
 #include "halide_blur.h"
 
-Buffer<uint16_t, 2> blur_halide(Buffer<uint16_t, 2> in) {
-    Buffer<uint16_t, 2> out(in.width() - 8, in.height() - 2);
+Buffer<uint16_t> blur_halide(Buffer<uint16_t> in) {
+    Buffer<uint16_t> out(in.width()-8, in.height()-2);
 
     // Call it once to initialize the halide runtime stuff
     halide_blur(in, out);
@@ -149,20 +189,12 @@ Buffer<uint16_t, 2> blur_halide(Buffer<uint16_t, 2> in) {
         out.device_sync();
     });
 
-    out.copy_to_host();
-
     return out;
 }
 
 int main(int argc, char **argv) {
-    const auto *md = halide_blur_metadata();
-    const bool is_hexagon = strstr(md->target, "hvx_128") || strstr(md->target, "hvx_64");
 
-    // The Hexagon simulator can't allocate as much memory as the above wants.
-    const int width = is_hexagon ? 648 : 2568;
-    const int height = is_hexagon ? 482 : 1922;
-
-    Buffer<uint16_t, 2> input(width, height);
+    Buffer<uint16_t> input(6408, 4802);
 
     for (int y = 0; y < input.height(); y++) {
         for (int x = 0; x < input.width(); x++) {
@@ -170,26 +202,27 @@ int main(int argc, char **argv) {
         }
     }
 
-    Buffer<uint16_t, 2> blurry = blur(input);
+    Buffer<uint16_t> blurry = blur(input);
     double slow_time = t;
 
-    Buffer<uint16_t, 2> speedy = blur_fast(input);
+    Buffer<uint16_t> speedy = blur_fast(input);
     double fast_time = t;
 
-    Buffer<uint16_t, 2> halide = blur_halide(input);
+    //Buffer<uint16_t> speedy2 = blur_fast2(input);
+    //float fast_time2 = t;
+
+    Buffer<uint16_t> halide = blur_halide(input);
     double halide_time = t;
 
+    // fast_time2 is always slower than fast_time, so skip printing it
     printf("times: %f %f %f\n", slow_time, fast_time, halide_time);
 
     for (int y = 64; y < input.height() - 64; y++) {
         for (int x = 64; x < input.width() - 64; x++) {
-            if (blurry(x, y) != speedy(x, y) || blurry(x, y) != halide(x, y)) {
+            if (blurry(x, y) != speedy(x, y) || blurry(x, y) != halide(x, y))
                 printf("difference at (%d,%d): %d %d %d\n", x, y, blurry(x, y), speedy(x, y), halide(x, y));
-                abort();
-            }
         }
     }
 
-    printf("Success!\n");
     return 0;
 }

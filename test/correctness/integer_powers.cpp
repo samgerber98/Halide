@@ -15,10 +15,8 @@ int main(int argc, char **argv) {
     Func f;
     Var x;
 
-    // Create x scaled down by 256. We're going to intentionally do
-    // something numerically unstable below, so we prevent folding out
-    // the /256, or large powers of x will be inf
-    Expr xf = strict_float(x / 256.0f);
+    Expr xf = x/256.0f;
+
 
     {
 
@@ -27,7 +25,7 @@ int main(int argc, char **argv) {
 
         Expr y1 = 0.0f;
         for (int k = 0; k < 20; k++) {
-            y1 += Halide::pow(-1, k) * pow(xf, 1 + 2 * k) * inverse_factorial(1 + 2 * k);
+            y1 += Halide::pow(-1, k) * pow(xf, 1+2*k) * inverse_factorial(1 + 2 * k);
         }
 
         Func approx_sin_1;
@@ -39,7 +37,7 @@ int main(int argc, char **argv) {
         // x*(1 - x*x/(2*3) * (1 - x*x/(4*5) * (1 - x*x/(6*7) * (1 - x*x/(8*9) * ( ... )))))
         Expr y2 = 1.0f;
         for (int k = 20; k > 0; k--) {
-            y2 = 1 - (y2 * pow(xf, 2)) / (2 * k * (2 * k + 1));
+            y2 = 1 - (y2 * pow(xf, 2)) / (2*k * (2*k + 1));
         }
         y2 *= xf;
 
@@ -50,9 +48,9 @@ int main(int argc, char **argv) {
         exact_sin(x) = sin(xf);
 
         // Evaluate from 0 to 5
-        Buffer<float> approx_result_1 = approx_sin_1.realize({256 * 5});
-        Buffer<float> approx_result_2 = approx_sin_2.realize({256 * 5});
-        Buffer<float> exact_result = exact_sin.realize({256 * 5});
+        Buffer<float> approx_result_1 = approx_sin_1.realize(256*5);
+        Buffer<float> approx_result_2 = approx_sin_2.realize(256*5);
+        Buffer<float> exact_result = exact_sin.realize(256*5);
 
         Func rms_1, rms_2;
         RDom r(exact_result);
@@ -63,7 +61,7 @@ int main(int argc, char **argv) {
 
         if (error_1(0) > 0.0001 || error_2(0) > 0.0001) {
             printf("Approximate sin errors too large: %1.20f %1.20f\n", error_1(0), error_2(0));
-            return 1;
+            return -1;
         }
     }
 
@@ -89,12 +87,12 @@ int main(int argc, char **argv) {
         approx_exp_2(x) = y2;
 
         Func exact_exp;
-        exact_exp(x) = exp(1.0f / xf);
+        exact_exp(x) = exp(1.0f/xf);
 
         // Evaluate from 0 to 5
-        Buffer<float> approx_result_1 = approx_exp_1.realize({256 * 5});
-        Buffer<float> approx_result_2 = approx_exp_2.realize({256 * 5});
-        Buffer<float> exact_result = exact_exp.realize({256 * 5});
+        Buffer<float> approx_result_1 = approx_exp_1.realize(256*5);
+        Buffer<float> approx_result_2 = approx_exp_2.realize(256*5);
+        Buffer<float> exact_result = exact_exp.realize(256*5);
 
         Func rms_1, rms_2;
         RDom r(exact_result);
@@ -105,7 +103,7 @@ int main(int argc, char **argv) {
 
         if (error_1(0) > 0.0001 || error_2(0) > 0.0001) {
             printf("Approximate exp errors too large: %1.20f %1.20f\n", error_1(0), error_2(0));
-            return 1;
+            return -1;
         }
     }
 

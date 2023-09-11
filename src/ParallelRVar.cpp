@@ -1,21 +1,19 @@
-#include "ParallelRVar.h"
-#include "CSE.h"
-#include "Debug.h"
-#include "Definition.h"
 #include "IR.h"
-#include "IREquality.h"
+#include "ParallelRVar.h"
 #include "IRMutator.h"
-#include "IROperator.h"
-#include "IRVisitor.h"
+#include "Debug.h"
 #include "Simplify.h"
+#include "IROperator.h"
 #include "Substitute.h"
+#include "CSE.h"
+#include "IREquality.h"
 
 namespace Halide {
 namespace Internal {
 
-using std::map;
 using std::string;
 using std::vector;
+using std::map;
 
 namespace {
 /** Find all calls arguments to the given function. Substitutes in
@@ -25,26 +23,24 @@ class FindLoads : public IRVisitor {
 
     const string &func;
 
-    void visit(const Call *op) override {
+    void visit(const Call *op) {
         if (op->name == func && op->call_type == Call::Halide) {
             loads.push_back(op->args);
         }
         IRVisitor::visit(op);
     }
 
-    void visit(const Let *op) override {
+    void visit(const Let *op) {
         IRVisitor::visit(op);
-        for (auto &load : loads) {
-            for (auto &e : load) {
-                e = graph_substitute(op->name, op->value, e);
+        for (size_t i = 0; i < loads.size(); i++) {
+            for (size_t j = 0; j < loads[i].size(); j++) {
+                loads[i][j] = substitute(op->name, op->value, loads[i][j]);
             }
         }
     }
 
 public:
-    FindLoads(const string &f)
-        : func(f) {
-    }
+    FindLoads(const string &f) : func(f) {}
 
     vector<vector<Expr>> loads;
 };
@@ -55,11 +51,11 @@ class RenameFreeVars : public IRMutator {
 
     map<string, string> new_names;
 
-    Expr visit(const Variable *op) override {
+    void visit(const Variable *op) {
         if (!op->param.defined() && !op->image.defined()) {
-            return Variable::make(op->type, get_new_name(op->name));
+            expr = Variable::make(op->type, get_new_name(op->name));
         } else {
-            return op;
+            expr = op;
         }
     }
 
@@ -73,22 +69,25 @@ public:
             new_names[s] = new_name;
             return new_name;
         }
+
     }
+
+
 };
 
 /** Substitute in boolean expressions. */
 class SubstituteInBooleanLets : public IRMutator {
     using IRMutator::visit;
 
-    Expr visit(const Let *op) override {
+    void visit(const Let *op) {
         if (op->value.type() == Bool()) {
-            return substitute(op->name, mutate(op->value), mutate(op->body));
+            expr = substitute(op->name, mutate(op->value), mutate(op->body));
         } else {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         }
     }
 };
-}  // namespace
+}
 
 bool can_parallelize_rvar(const string &v,
                           const string &f,
@@ -98,19 +97,16 @@ bool can_parallelize_rvar(const string &v,
     const vector<ReductionVariable> &rvars = r.schedule().rvars();
 
     FindLoads find(f);
-    for (const auto &value : values) {
-        value.accept(&find);
-    }
-
-    // add loads from predicate
-    const Expr pred = simplify(r.predicate());
-    if (pred.defined()) {
-        pred.accept(&find);
+    for (size_t i = 0; i < values.size(); i++) {
+        values[i].accept(&find);
     }
 
     // Make an expr representing the store done by a different thread.
     RenameFreeVars renamer;
-    auto other_store = renamer.mutate(args);
+    vector<Expr> other_store(args.size());
+    for (size_t i = 0; i < args.size(); i++) {
+        other_store[i] = renamer.mutate(args[i]);
+    }
 
     // Construct an expression which is true when the two threads are
     // in fact two different threads. We'll use this liberally in the
@@ -127,11 +123,11 @@ bool can_parallelize_rvar(const string &v,
 
     // Add expressions that are true if there's a collision between
     // the other thread's store and this thread's loads.
-    for (auto &load : find.loads) {
-        internal_assert(load.size() == other_store.size());
+    for (size_t i = 0; i < find.loads.size(); i++) {
+        internal_assert(find.loads[i].size() == other_store.size());
         Expr check = const_true();
-        for (size_t j = 0; j < load.size(); j++) {
-            check = check && (distinct_v && (load[j] == other_store[j]));
+        for (size_t j = 0; j < find.loads[i].size(); j++) {
+            check = check && (distinct_v && (find.loads[i][j] == other_store[j]));
         }
         hazard = hazard || check;
     }
@@ -145,6 +141,7 @@ bool can_parallelize_rvar(const string &v,
     }
 
     // Add the definition's predicate if there is any
+    Expr pred = simplify(r.predicate());
     if (pred.defined() || !equal(const_true(), pred)) {
         Expr this_pred = pred;
         Expr other_pred = renamer.mutate(pred);
@@ -165,8 +162,8 @@ bool can_parallelize_rvar(const string &v,
         hazard = l->body;
     }
 
-    return is_const_zero(hazard);
+    return is_zero(hazard);
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

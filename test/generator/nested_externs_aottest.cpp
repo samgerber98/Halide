@@ -7,12 +7,9 @@
 using namespace Halide::Runtime;
 
 int main(int argc, char **argv) {
-    auto buf = Buffer<float, 3>::make_interleaved(100, 200, 3);
-    auto val = Buffer<float, 0>::make_scalar();
-    val() = 38.5f;
+    auto buf = Buffer<float>::make_interleaved(100, 200, 3);
 
-    void const *ucon = nullptr;
-    nested_externs_root(ucon, val, buf);
+    nested_externs_root(38.5f, buf);
 
     buf.for_each_element([&](int x, int y, int c) {
         const float correct = 158.0f;
@@ -20,7 +17,7 @@ int main(int argc, char **argv) {
         if (actual != correct) {
             printf("result(%d, %d, %d) = %f instead of %f\n",
                    x, y, c, actual, correct);
-            exit(1);
+            exit(-1);
         }
     });
 

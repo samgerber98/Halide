@@ -1,46 +1,41 @@
-#include <cstdlib>
+#include <stdlib.h>
 
-#include <utility>
-
-#include "Definition.h"
 #include "IR.h"
-#include "IRMutator.h"
 #include "IROperator.h"
-#include "Introspection.h"
+#include "IRMutator.h"
+#include "Definition.h"
 #include "Var.h"
 
 namespace Halide {
 namespace Internal {
 
-using std::string;
 using std::vector;
+using std::string;
+using std::map;
 
 struct DefinitionContents {
     mutable RefCount ref_count;
-    bool is_init = true;
+    bool is_init;
     Expr predicate;
     std::vector<Expr> values, args;
-    StageSchedule stage_schedule;
+    Schedule schedule;
     std::vector<Specialization> specializations;
-    std::string source_location;
 
-    DefinitionContents()
-        : predicate(const_true()) {
-    }
+    DefinitionContents() : is_init(true), predicate(const_true()) {}
 
     void accept(IRVisitor *visitor) const {
         if (predicate.defined()) {
             predicate.accept(visitor);
         }
 
-        for (const Expr &val : values) {
+        for (Expr val : values) {
             val.accept(visitor);
         }
-        for (const Expr &arg : args) {
+        for (Expr arg : args) {
             arg.accept(visitor);
         }
 
-        stage_schedule.accept(visitor);
+        schedule.accept(visitor);
 
         for (const Specialization &s : specializations) {
             if (s.condition.defined()) {
@@ -55,14 +50,14 @@ struct DefinitionContents {
             predicate = mutator->mutate(predicate);
         }
 
-        for (auto &value : values) {
-            value = mutator->mutate(value);
+        for (size_t i = 0; i < values.size(); ++i) {
+            values[i] = mutator->mutate(values[i]);
         }
-        for (auto &arg : args) {
-            arg = mutator->mutate(arg);
+        for (size_t i = 0; i < args.size(); ++i) {
+            args[i] = mutator->mutate(args[i]);
         }
 
-        stage_schedule.mutate(mutator);
+        schedule.mutate(mutator);
 
         for (Specialization &s : specializations) {
             if (s.condition.defined()) {
@@ -74,76 +69,56 @@ struct DefinitionContents {
 };
 
 template<>
-RefCount &ref_count<DefinitionContents>(const DefinitionContents *d) noexcept {
+EXPORT RefCount &ref_count<DefinitionContents>(const DefinitionContents *d) {
     return d->ref_count;
 }
 
 template<>
-void destroy<DefinitionContents>(const DefinitionContents *d) {
+EXPORT void destroy<DefinitionContents>(const DefinitionContents *d) {
     delete d;
 }
 
-Definition::Definition()
-    : contents(nullptr) {
-}
+Definition::Definition() : contents(new DefinitionContents) {}
 
-Definition::Definition(const IntrusivePtr<DefinitionContents> &ptr)
-    : contents(ptr) {
+Definition::Definition(const IntrusivePtr<DefinitionContents> &ptr) : contents(ptr) {
     internal_assert(ptr.defined())
         << "Can't construct Function from undefined DefinitionContents ptr\n";
 }
 
 Definition::Definition(const std::vector<Expr> &args, const std::vector<Expr> &values,
                        const ReductionDomain &rdom, bool is_init)
-    : contents(new DefinitionContents) {
+                       : contents(new DefinitionContents) {
     contents->is_init = is_init;
     contents->values = values;
     contents->args = args;
-    contents->source_location = Introspection::get_source_location();
     if (rdom.defined()) {
         contents->predicate = rdom.predicate();
-        for (const auto &rv : rdom.domain()) {
-            contents->stage_schedule.rvars().push_back(rv);
+        for (size_t i = 0; i < rdom.domain().size(); i++) {
+            contents->schedule.rvars().push_back(rdom.domain()[i]);
         }
     }
 }
 
-Definition::Definition(bool is_init, const Expr &predicate, const std::vector<Expr> &args, const std::vector<Expr> &values,
-                       const StageSchedule &schedule, const std::vector<Specialization> &specializations, const std::string &source_location)
-    : contents(new DefinitionContents) {
-    contents->is_init = is_init;
-    contents->values = values;
-    contents->args = args;
-    contents->predicate = predicate;
-    contents->stage_schedule = schedule;
-    contents->specializations = specializations;
-    contents->source_location = source_location;
-}
+// Return deep-copy of Definition
+Definition Definition::deep_copy(
+        std::map<IntrusivePtr<FunctionContents>, IntrusivePtr<FunctionContents>> &copied_map) const {
+    internal_assert(contents.defined()) << "Cannot deep-copy undefined Definition\n";
 
-Definition Definition::get_copy() const {
-    internal_assert(contents.defined()) << "Cannot copy undefined Definition\n";
-
-    Definition copy(new DefinitionContents);
+    Definition copy;
     copy.contents->is_init = contents->is_init;
     copy.contents->predicate = contents->predicate;
     copy.contents->values = contents->values;
     copy.contents->args = contents->args;
-    copy.contents->stage_schedule = contents->stage_schedule.get_copy();
-    copy.contents->source_location = contents->source_location;
+    copy.contents->schedule = contents->schedule.deep_copy(copied_map);
 
     // Deep-copy specializations
     for (const Specialization &s : contents->specializations) {
         Specialization s_copy;
         s_copy.condition = s.condition;
-        s_copy.definition = s.definition.get_copy();
-        s_copy.failure_message = s.failure_message;
+        s_copy.definition = s.definition.deep_copy(copied_map);
         copy.contents->specializations.push_back(std::move(s_copy));
     }
     return copy;
-}
-
-bool Definition::defined() const {
-    return contents.defined();
 }
 
 bool Definition::is_init() const {
@@ -188,12 +163,12 @@ std::vector<Expr> Definition::split_predicate() const {
     return predicates;
 }
 
-StageSchedule &Definition::schedule() {
-    return contents->stage_schedule;
+Schedule &Definition::schedule() {
+    return contents->schedule;
 }
 
-const StageSchedule &Definition::schedule() const {
-    return contents->stage_schedule;
+const Schedule &Definition::schedule() const {
+    return contents->schedule;
 }
 
 std::vector<Specialization> &Definition::specializations() {
@@ -204,26 +179,29 @@ const std::vector<Specialization> &Definition::specializations() const {
     return contents->specializations;
 }
 
-std::string Definition::source_location() const {
-    return contents->source_location;
-}
-
 const Specialization &Definition::add_specialization(Expr condition) {
     Specialization s;
-    s.condition = std::move(condition);
-    s.definition.contents = new DefinitionContents;
+    s.condition = condition;
     s.definition.contents->is_init = contents->is_init;
     s.definition.contents->predicate = contents->predicate;
     s.definition.contents->values = contents->values;
-    s.definition.contents->args = contents->args;
-    s.definition.contents->source_location = contents->source_location;
+    s.definition.contents->args   = contents->args;
 
     // The sub-schedule inherits everything about its parent except for its specializations.
-    s.definition.contents->stage_schedule = contents->stage_schedule.get_copy();
+    s.definition.contents->schedule.store_level()      = contents->schedule.store_level();
+    s.definition.contents->schedule.compute_level()    = contents->schedule.compute_level();
+    s.definition.contents->schedule.rvars()            = contents->schedule.rvars();
+    s.definition.contents->schedule.splits()           = contents->schedule.splits();
+    s.definition.contents->schedule.dims()             = contents->schedule.dims();
+    s.definition.contents->schedule.storage_dims()     = contents->schedule.storage_dims();
+    s.definition.contents->schedule.bounds()           = contents->schedule.bounds();
+    s.definition.contents->schedule.memoized()         = contents->schedule.memoized();
+    s.definition.contents->schedule.touched()          = contents->schedule.touched();
+    s.definition.contents->schedule.allow_race_conditions() = contents->schedule.allow_race_conditions();
 
     contents->specializations.push_back(s);
     return contents->specializations.back();
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

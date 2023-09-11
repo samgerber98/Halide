@@ -8,20 +8,17 @@
  */
 
 #include <map>
-#include <string>
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
-
-class Function;
 
 /** Try to simplify the RHS/LHS of a function's definition based on its
  * specializations. */
 void simplify_specializations(std::map<std::string, Function> &env);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

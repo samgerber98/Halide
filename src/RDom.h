@@ -6,20 +6,13 @@
  * variables.
  */
 
-#include <iostream>
-#include <string>
-#include <utility>
-#include <vector>
+#include "IR.h"
 
-#include "Expr.h"
-#include "Reduction.h"
-#include "Util.h"
+#include <vector>
 
 namespace Halide {
 
-template<typename T, int Dims>
-class Buffer;
-class OutputImageParam;
+class ImageParam;
 
 /** A reduction variable represents a single dimension of a reduction
  * domain (RDom). Don't construct them directly, instead construct an
@@ -29,48 +22,41 @@ class OutputImageParam;
 class RVar {
     std::string _name;
     Internal::ReductionDomain _domain;
-    int _index = -1;
+    int _index;
 
     const Internal::ReductionVariable &_var() const {
-        const auto &d = _domain.domain();
-        internal_assert(_index >= 0 && _index < (int)d.size());
-        return d.at(_index);
+        return _domain.domain().at(_index);
     }
 
 public:
     /** An empty reduction variable. */
-    RVar()
-        : _name(Internal::make_entity_name(this, "Halide:.*:RVar", 'r')) {
-    }
+    RVar() : _name(Internal::make_entity_name(this, "Halide::RVar", 'r')) {}
 
     /** Construct an RVar with the given name */
-    explicit RVar(const std::string &n)
-        : _name(n) {
+    explicit RVar(const std::string &n) : _name(n) {
     }
 
     /** Construct a reduction variable with the given name and
      * bounds. Must be a member of the given reduction domain. */
-    RVar(Internal::ReductionDomain domain, int index)
-        : _domain(std::move(domain)), _index(index) {
+    RVar(Internal::ReductionDomain domain, int index) :
+        _domain(domain), _index(index) {
     }
 
     /** The minimum value that this variable will take on */
-    Expr min() const;
+    EXPORT Expr min() const;
 
     /** The number that this variable will take on. The maximum value
      * of this variable will be min() + extent() - 1 */
-    Expr extent() const;
+    EXPORT Expr extent() const;
 
     /** The reduction domain this is associated with. */
-    Internal::ReductionDomain domain() const {
-        return _domain;
-    }
+    EXPORT Internal::ReductionDomain domain() const {return _domain;}
 
     /** The name of this reduction variable */
-    const std::string &name() const;
+    EXPORT const std::string &name() const;
 
     /** Reduction variables can be used as expressions. */
-    operator Expr() const;
+    EXPORT operator Expr() const;
 };
 
 /** A multi-dimensional domain over which to iterate. Used when
@@ -89,7 +75,7 @@ public:
  RDom r(0, 10);
  f(x) = x; // the initial value
  f(r) = f(r) * 2;
- Buffer<int> result = f.realize({10});
+ Buffer<int> result = f.realize(10);
  \endcode
  *
  * This function creates a single-dimensional buffer of size 10, in
@@ -193,35 +179,33 @@ public:
 class RDom {
     Internal::ReductionDomain dom;
 
-    void init_vars(const std::string &name);
+    void init_vars(std::string name);
 
-    void validate_min_extent(const Expr &min, const Expr &extent);
-    void initialize_from_region(const Region &region, std::string name = "");
+    EXPORT void initialize_from_ranges(const std::vector<std::pair<Expr, Expr>> &ranges, std::string name = "");
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE void initialize_from_region(Region &region, const Expr &min, const Expr &extent, Args &&...args) {
-        validate_min_extent(min, extent);
-        region.emplace_back(min, extent);
-        initialize_from_region(region, std::forward<Args>(args)...);
+    template <typename... Args>
+    NO_INLINE void initialize_from_ranges(std::vector<std::pair<Expr, Expr>> &ranges, Expr min, Expr extent, Args&&... args) {
+        ranges.push_back({ min, extent });
+        initialize_from_ranges(ranges, std::forward<Args>(args)...);
     }
 
 public:
     /** Construct an undefined reduction domain. */
-    RDom() = default;
+    EXPORT RDom() {}
 
     /** Construct a multi-dimensional reduction domain with the given name. If the name
      * is left blank, a unique one is auto-generated. */
     // @{
-    HALIDE_NO_USER_CODE_INLINE RDom(const Region &region, std::string name = "") {
-        initialize_from_region(region, std::move(name));
+    NO_INLINE RDom(const std::vector<std::pair<Expr, Expr>> &ranges, std::string name = "") {
+        initialize_from_ranges(ranges, name);
     }
 
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE RDom(Expr min, Expr extent, Args &&...args) {
+    template <typename... Args>
+    NO_INLINE RDom(Expr min, Expr extent, Args&&... args) {
         // This should really just be a delegating constructor, but I couldn't make
         // that work with variadic template unpacking in visual studio 2013
-        Region region;
-        initialize_from_region(region, min, extent, std::forward<Args>(args)...);
+        std::vector<std::pair<Expr, Expr>> ranges;
+        initialize_from_ranges(ranges, min, extent, std::forward<Args>(args)...);
     }
     // @}
 
@@ -229,43 +213,35 @@ public:
      * a given Buffer or ImageParam. Has the same dimensionality as
      * the argument. */
     // @{
-    RDom(const Buffer<void, -1> &);
-    RDom(const OutputImageParam &);
-    template<typename T, int Dims>
-    HALIDE_NO_USER_CODE_INLINE RDom(const Buffer<T, Dims> &im)
-        : RDom(Buffer<void, -1>(im)) {
-    }
+    EXPORT RDom(const Buffer<> &);
+    EXPORT RDom(ImageParam);
+    template<typename T>
+    NO_INLINE RDom(const Buffer<T> &im) : RDom(Buffer<>(im)) {}
     // @}
 
     /** Construct a reduction domain that wraps an Internal ReductionDomain object. */
-    RDom(const Internal::ReductionDomain &d);
+    EXPORT RDom(Internal::ReductionDomain d);
 
     /** Get at the internal reduction domain object that this wraps. */
-    Internal::ReductionDomain domain() const {
-        return dom;
-    }
+    Internal::ReductionDomain domain() const {return dom;}
 
     /** Check if this reduction domain is non-null */
-    bool defined() const {
-        return dom.defined();
-    }
+    bool defined() const {return dom.defined();}
 
     /** Compare two reduction domains for equality of reference */
-    bool same_as(const RDom &other) const {
-        return dom.same_as(other.dom);
-    }
+    bool same_as(const RDom &other) const {return dom.same_as(other.dom);}
 
     /** Get the dimensionality of a reduction domain */
-    int dimensions() const;
+    EXPORT int dimensions() const;
 
     /** Get at one of the dimensions of the reduction domain */
-    RVar operator[](int) const;
+    EXPORT RVar operator[](int) const;
 
     /** Single-dimensional reduction domains can be used as RVars directly. */
-    operator RVar() const;
+    EXPORT operator RVar() const;
 
     /** Single-dimensional reduction domains can be also be used as Exprs directly. */
-    operator Expr() const;
+    EXPORT operator Expr() const;
 
     /** Add a predicate to the RDom. An RDom may have multiple
      * predicates associated with it. An update definition that uses
@@ -313,7 +289,7 @@ public:
      *
      \code
      for (int r.y = 14; r.y < 20; r.y++) {
-       f[10, r.y] += 1;
+       f[r.x, r.y] += 1;
      }
      \endcode
      *
@@ -330,7 +306,7 @@ public:
      \endcode
      *
      */
-    void where(Expr predicate);
+    EXPORT void where(Expr predicate);
 
     /** Direct access to the first four dimensions of the reduction
      * domain. Some of these variables may be undefined if the
@@ -341,10 +317,10 @@ public:
 };
 
 /** Emit an RVar in a human-readable form */
-std::ostream &operator<<(std::ostream &stream, const RVar &);
+std::ostream &operator<<(std::ostream &stream, RVar);
 
 /** Emit an RDom in a human-readable form. */
-std::ostream &operator<<(std::ostream &stream, const RDom &);
-}  // namespace Halide
+std::ostream &operator<<(std::ostream &stream, RDom);
+}
 
 #endif

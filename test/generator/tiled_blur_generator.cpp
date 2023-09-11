@@ -2,8 +2,6 @@
 
 namespace {
 
-using Halide::saturating_cast;
-
 template<typename T>
 Halide::Expr is_interleaved(const T &p, int channels = 3) {
     return p.dim(0).stride() == channels && p.dim(2).stride() == 1 && p.dim(2).extent() == channels;
@@ -16,61 +14,55 @@ Halide::Expr is_planar(const T &p, int channels = 3) {
 
 class TiledBlur : public Halide::Generator<TiledBlur> {
 public:
-    Input<Buffer<uint8_t, 3>> input{"input"};
-    Output<Buffer<uint8_t, 3>> output{"output"};
+    Input<Buffer<int32_t>> input{ "input", 3 };
+    Output<Buffer<float>> brighter2{ "brighter2", 3 };
 
     void generate() {
-        Expr input_float = cast<float>(input(x, y, c)) / 255.f;
-
         // This is the outermost pipeline, so input width and height
         // are meaningful. If you want to be able to call this outer
         // pipeline in a tiled fashion itself, then you should pass in
         // width and height as params, as with the blur above.
-        brightened(x, y, c) = input_float * 1.2f;
+        brighter1(x, y, c) = input(x, y, c) * 1.2f;
 
         tiled_blur.define_extern(
-            "blur2x2",
-            {brightened, input.dim(0).extent(), input.dim(1).extent()},
+            "tiled_blur_blur",
+            { brighter1, input.dim(0).extent(), input.dim(1).extent() },
             Float(32), 3);
 
-        Expr tiled_blur_brightened = tiled_blur(x, y, c) * 1.2f;
-
-        output(x, y, c) = saturating_cast<uint8_t>(tiled_blur_brightened * 255.f);
+        brighter2(x, y, c) = tiled_blur(x, y, c) * 1.2f;
     }
 
     void schedule() {
         Var xi, yi;
-        output.reorder(c, x, y).tile(x, y, xi, yi, 32, 32);
-        tiled_blur.compute_at(output, x);
-        brightened.compute_at(output, x);
+        Func(brighter2).reorder(c, x, y).tile(x, y, xi, yi, 32, 32);
+        tiled_blur.compute_at(brighter2, x);
+        brighter1.compute_at(brighter2, x);
 
         // Let's see what tiled_blur decides that it needs from
-        // brightened. They should be 34x34 tiles, but clamped to fit
+        // brighter1. They should be 34x34 tiles, but clamped to fit
         // within the input, so they'll often be 33x34, 34x33, or
         // 33x33 near the boundaries
-        brightened.trace_realizations();
+        brighter1.trace_realizations();
 
         // Unset default constraints so that specialization works.
         input.dim(0).set_stride(Expr());
-        output.dim(0).set_stride(Expr());
+        brighter2.dim(0).set_stride(Expr());
 
         // Add specialization for input and output buffers that are both planar.
-        output.specialize(is_planar(input) && is_planar(output))
-            .vectorize(xi, natural_vector_size<float>());
+        Func(brighter2).specialize(is_planar(input) && is_planar(brighter2));
 
         // Add specialization for input and output buffers that are both interleaved.
-        output.specialize(is_interleaved(input) && is_interleaved(output));
+        Func(brighter2).specialize(is_interleaved(input) && is_interleaved(brighter2));
 
         // Note that other combinations (e.g. interleaved -> planar) will work
         // but be relatively unoptimized.
     }
-
 private:
     Var x{"x"}, y{"y"}, c{"c"};
     Func tiled_blur{"tiled_blur"};
-    Func brightened{"brightened"};
+    Func brighter1{"brighter1"};
 };
 
-}  // namespace
+HALIDE_REGISTER_GENERATOR(TiledBlur, "tiled_blur")
 
-HALIDE_REGISTER_GENERATOR(TiledBlur, tiled_blur)
+}  // namespace

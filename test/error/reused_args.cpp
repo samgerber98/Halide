@@ -9,6 +9,5 @@ int main(int argc, char **argv) {
     // pure definition.
     f(x, x) = x;
 
-    printf("Success!\n");
     return 0;
 }

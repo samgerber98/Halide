@@ -3,14 +3,8 @@
 extern "C" {
 
 WEAK char *halide_string_to_string(char *dst, char *end, const char *arg) {
-    if (dst >= end) {
-        return dst;
-    }
-    if (!arg) {
-        // Crashing on nullptr here is a big debugging time sink.
-        arg = "<nullptr>";
-    }
-    while (true) {
+    if (dst >= end) return dst;
+    while (1) {
         if (dst == end) {
             dst[-1] = 0;
             return dst;
@@ -28,7 +22,7 @@ WEAK char *halide_uint64_to_string(char *dst, char *end, uint64_t arg, int min_d
     // 32 is more than enough chars to contain any 64-bit int.
     char buf[32];
     buf[31] = 0;
-    char *digits = buf + 30;
+    char *digits = buf+30;
 
     for (int i = 0; i < min_digits || arg; i++) {
         uint64_t top = arg / 10;
@@ -95,6 +89,7 @@ WEAK char *halide_double_to_string(char *dst, char *end, double arg, int scienti
         arg = -arg;
     }
 
+
     // The desired number of decimal places.
     const int decimal_places = 6;
 
@@ -119,7 +114,7 @@ WEAK char *halide_double_to_string(char *dst, char *end, double arg, int scienti
         }
 
         // Convert to fixed-point;
-        uint64_t fixed = (uint64_t)(arg * scale + 0.5);  // NOLINT(bugprone-incorrect-roundings)
+        uint64_t fixed = (uint64_t)(arg * scale + 0.5);
         uint64_t top_digit = fixed / scale;
         uint64_t other_digits = fixed - top_digit * scale;
 
@@ -236,76 +231,15 @@ WEAK char *halide_double_to_string(char *dst, char *end, double arg, int scienti
 WEAK char *halide_pointer_to_string(char *dst, char *end, const void *arg) {
     const char *hex_digits = "0123456789abcdef";
     char buf[20] = {0};
-    char *buf_ptr = buf + 18;
+    char *buf_ptr = buf+18;
     uint64_t bits = (uint64_t)arg;
     for (int i = 0; i < 16; i++) {
         *buf_ptr-- = hex_digits[bits & 15];
         bits >>= 4;
-        if (!bits) {
-            break;
-        }
+        if (!bits) break;
     }
     *buf_ptr-- = 'x';
     *buf_ptr = '0';
     return halide_string_to_string(dst, end, buf_ptr);
-}
-
-WEAK char *halide_type_to_string(char *dst, char *end, const halide_type_t *t) {
-    const char *code_name = nullptr;
-    switch (t->code) {
-    case halide_type_int:
-        code_name = "int";
-        break;
-    case halide_type_uint:
-        code_name = "uint";
-        break;
-    case halide_type_float:
-        code_name = "float";
-        break;
-    case halide_type_handle:
-        code_name = "handle";
-        break;
-    case halide_type_bfloat:
-        code_name = "bfloat";
-        break;
-    default:
-        code_name = "bad_type_code";
-        break;
-    }
-    dst = halide_string_to_string(dst, end, code_name);
-    dst = halide_uint64_to_string(dst, end, t->bits, 1);
-    if (t->lanes != 1) {
-        dst = halide_string_to_string(dst, end, "x");
-        dst = halide_uint64_to_string(dst, end, t->lanes, 1);
-    }
-    return dst;
-}
-
-WEAK char *halide_buffer_to_string(char *dst, char *end, const halide_buffer_t *buf) {
-    if (buf == nullptr) {
-        return halide_string_to_string(dst, end, "nullptr");
-    }
-    dst = halide_pointer_to_string(dst, end, buf);
-    dst = halide_string_to_string(dst, end, " -> buffer(");
-    dst = halide_uint64_to_string(dst, end, buf->device, 1);
-    dst = halide_string_to_string(dst, end, ", ");
-    dst = halide_pointer_to_string(dst, end, buf->device_interface);
-    dst = halide_string_to_string(dst, end, ", ");
-    dst = halide_pointer_to_string(dst, end, buf->host);
-    dst = halide_string_to_string(dst, end, ", ");
-    dst = halide_uint64_to_string(dst, end, buf->flags, 1);
-    dst = halide_string_to_string(dst, end, ", ");
-    dst = halide_type_to_string(dst, end, &(buf->type));
-    for (int i = 0; i < buf->dimensions; i++) {
-        dst = halide_string_to_string(dst, end, ", {");
-        dst = halide_int64_to_string(dst, end, buf->dim[i].min, 1);
-        dst = halide_string_to_string(dst, end, ", ");
-        dst = halide_int64_to_string(dst, end, buf->dim[i].extent, 1);
-        dst = halide_string_to_string(dst, end, ", ");
-        dst = halide_int64_to_string(dst, end, buf->dim[i].stride, 1);
-        dst = halide_string_to_string(dst, end, "}");
-    }
-    dst = halide_string_to_string(dst, end, ")");
-    return dst;
 }
 }

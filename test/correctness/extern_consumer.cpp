@@ -1,24 +1,31 @@
 #include "Halide.h"
-#include "halide_test_dirs.h"
+#include <stdio.h>
 
-#include <cstdio>
+#include "test/common/halide_test_dirs.h"
 
 using namespace Halide;
 
-extern "C" HALIDE_EXPORT_SYMBOL int dump_to_file(halide_buffer_t *input, const char *filename,
-                                                 int desired_min, int desired_extent,
-                                                 halide_buffer_t *) {
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
+extern "C" DLLEXPORT
+int dump_to_file(buffer_t *input, const char *filename,
+                 int desired_min, int desired_extent,
+                 buffer_t *) {
     // Note the final output buffer argument is unused.
-    if (input->is_bounds_query()) {
+    if (input->host == nullptr) {
         // Request some range of the input buffer
-        input->dim[0].min = desired_min;
-        input->dim[0].extent = desired_extent;
+        input->min[0] = desired_min;
+        input->extent[0] = desired_extent;
     } else {
         FILE *f = fopen(filename, "w");
         // Depending on the schedule, other consumers, etc, Halide may
         // have evaluated more than we asked for, so don't assume that
         // the min and extents match what we requested.
-        int *base = ((int *)input->host) - input->dim[0].min;
+        int *base = ((int *)input->host) - input->min[0];
         for (int i = desired_min; i < desired_min + desired_extent; i++) {
             fprintf(f, "%d\n", base[i]);
         }
@@ -59,16 +66,11 @@ bool check_result() {
 }
 
 int main(int argc, char **argv) {
-    if (get_jit_target_from_environment().arch == Target::WebAssembly) {
-        printf("[SKIP] WebAssembly JIT does not support passing arbitrary pointers to/from HalideExtern code.\n");
-        return 0;
-    }
-
     // Define a pipeline that dumps some squares to a file using an
     // external consumer stage.
     Func source;
     Var x;
-    source(x) = x * x;
+    source(x) = x*x;
 
     Param<int> min, extent;
     Param<const char *> filename;
@@ -81,8 +83,7 @@ int main(int argc, char **argv) {
     args.push_back(extent);
     sink.define_extern("dump_to_file", args, Int(32), 0);
 
-    // Extern stages still have an outermost var.
-    source.compute_at(sink, Var::outermost());
+    source.compute_root();
 
     sink.compile_jit();
 
@@ -96,10 +97,10 @@ int main(int argc, char **argv) {
     sink.realize();
 
     if (!check_result())
-        return 1;
+        return -1;
 
     // Test ImageParam ExternFuncArgument via passed in image.
-    Buffer<int32_t> buf = source.realize({10});
+    Buffer<int32_t> buf = source.realize(10);
     ImageParam passed_in(Int(32), 1);
     passed_in.set(buf);
 
@@ -114,8 +115,9 @@ int main(int argc, char **argv) {
     sink2.realize();
 
     if (!check_result())
-        return 1;
+        return -1;
 
     printf("Success!\n");
     return 0;
+
 }

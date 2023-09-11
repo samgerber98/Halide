@@ -4,11 +4,9 @@
 /** \file
  * Defines helpers for passing arguments to separate devices, such as GPUs.
  */
-#include <string>
 
+#include "IR.h"
 #include "Closure.h"
-#include "Expr.h"
-#include "ModulusRemainder.h"
 
 namespace Halide {
 namespace Internal {
@@ -34,79 +32,71 @@ struct DeviceArgument {
      * the expected interpretation of the buffer data (e.g. float vs int),
      * but there is no runtime enforcement of this at present.
      */
-    bool is_buffer = false;
-
-    /** If is_buffer == true and memory_type == GPUTexture, this argument should be
-     * passed and accessed through texture sampler operations instead of
-     * directly as a memory array
-     */
-    MemoryType memory_type = MemoryType::Auto;
+    bool is_buffer;
 
     /** If is_buffer is true, this is the dimensionality of the buffer.
      * If is_buffer is false, this value is ignored (and should always be set to zero) */
-    uint8_t dimensions = 0;
+    uint8_t dimensions;
 
     /** If this is a scalar parameter, then this is its type.
      *
      * If this is a buffer parameter, this is used to determine elem_size
-     * of the halide_buffer_t.
+     * of the buffer_t.
      *
      * Note that type.lanes() should always be 1 here. */
     Type type;
 
     /** The static size of the argument if known, or zero otherwise. */
-    size_t size = 0;
+    size_t size;
 
     /** The index of the first element of the argument when packed into a wider
      * type, such as packing scalar floats into vec4 for GLSL. */
-    size_t packed_index = 0;
+    size_t packed_index;
 
     /** For buffers, these two variables can be used to specify whether the
      * buffer is read or written. By default, we assume that the argument
      * buffer is read-write and set both flags. */
-    bool read = false;
-    bool write = false;
+    bool read;
+    bool write;
 
-    /** Alignment information for integer parameters. */
-    ModulusRemainder alignment;
-
-    DeviceArgument() = default;
+    DeviceArgument() :
+        is_buffer(false),
+        dimensions(0),
+        size(0),
+        packed_index(0),
+        read(false),
+        write(false) {}
 
     DeviceArgument(const std::string &_name,
                    bool _is_buffer,
-                   MemoryType _mem,
                    Type _type,
                    uint8_t _dimensions,
-                   size_t _size = 0)
-        : name(_name),
-          is_buffer(_is_buffer),
-          memory_type(_mem),
-          dimensions(_dimensions),
-          type(_type),
-          size(_size),
-
-          read(_is_buffer),
-          write(_is_buffer) {
-    }
+                   size_t _size = 0) :
+        name(_name),
+        is_buffer(_is_buffer),
+        dimensions(_dimensions),
+        type(_type),
+        size(_size),
+        packed_index(0),
+        read(_is_buffer),
+        write(_is_buffer) {}
 };
 
 /** A Closure modified to inspect GPU-specific memory accesses, and
  * produce a vector of DeviceArgument objects. */
 class HostClosure : public Closure {
 public:
-    HostClosure() = default;
+    HostClosure(Stmt s, const std::string &loop_variable = "");
 
     /** Get a description of the captured arguments. */
     std::vector<DeviceArgument> arguments();
 
 protected:
     using Internal::Closure::visit;
-
-    void visit(const For *loop) override;
-    void visit(const Call *op) override;
+    void visit(const For *loop);
+    void visit(const Call *op);
 };
 
-}  // namespace Internal
-}  // namespace Halide
+}}
 
 #endif

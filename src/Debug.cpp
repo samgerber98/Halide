@@ -1,5 +1,4 @@
 #include "Debug.h"
-#include "Util.h"
 
 namespace Halide {
 namespace Internal {
@@ -12,5 +11,5 @@ int debug::debug_level() {
     return cached_debug_level;
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

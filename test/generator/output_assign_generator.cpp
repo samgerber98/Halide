@@ -13,8 +13,8 @@ Func build_simple_func(int extra) {
 
 class OutputAssign : public Halide::Generator<OutputAssign> {
 public:
-    Output<Func> output{"output", Int(32), 2};
-    Output<Func[2]> output_array{"output_array", Int(32), 2};
+    Output<Func> output{ "output", Int(32), 2 };
+    Output<Func[2]> output_array{ "output_array", Int(32), 2 }; 
 
     void generate() {
         output = build_simple_func(0);
@@ -23,11 +23,11 @@ public:
         }
     }
 
-    void schedule() {
+     void schedule() {
         // nothing
-    }
+     }
 };
 
-}  // namespace
+HALIDE_REGISTER_GENERATOR(OutputAssign, "output_assign")
 
-HALIDE_REGISTER_GENERATOR(OutputAssign, output_assign)
+}  // namespace

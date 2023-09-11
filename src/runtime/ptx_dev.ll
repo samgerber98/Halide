@@ -17,17 +17,13 @@ declare  i32 @llvm.nvvm.read.ptx.sreg.ntid.w()
 declare  i32 @llvm.nvvm.read.ptx.sreg.nctaid.w()
 declare  i32 @llvm.nvvm.read.ptx.sreg.warpsize()
 
-; Remove these two once the minimum required llvm version is 9.0
-declare float @llvm.nvvm.atomic.load.add.f32.p0f32(float*, float)
-declare double @llvm.nvvm.atomic.load.add.f64.p0f64(double *, double)
-
 ; Legacy - to replace
 ;declare void @llvm.ptx.red.global.add.s32(i32*, i32)
 ;declare void @llvm.ptx.red.global.add.f32(float*, float)
 ;declare void @llvm.ptx.red.shared.add.s32(i32 addrspace(4)*, i32)
 
 define weak_odr float @nan_f32() nounwind uwtable readnone alwaysinline {
-       ret float 0x7FF8000000000000;
+       ret float 0xFFF0000000000000;
 }
 
 define weak_odr float @neg_inf_f32() nounwind uwtable readnone alwaysinline {
@@ -153,6 +149,19 @@ define weak_odr float @ceil_f32(float %x) nounwind uwtable readnone alwaysinline
 
 define weak_odr double @ceil_f64(double %x) nounwind uwtable readnone alwaysinline {
        %y = tail call double @__nv_ceil(double %x) nounwind readnone
+       ret double %y
+}
+
+declare float @__nv_nearbyintf(float) nounwind readnone
+declare double @__nv_nearbyint(double) nounwind readnone
+
+define weak_odr float @round_f32(float %x) nounwind uwtable readnone alwaysinline {
+       %y = tail call float @__nv_nearbyintf(float %x) nounwind readnone
+       ret float %y
+}
+
+define weak_odr double @round_f64(double %x) nounwind uwtable readnone alwaysinline {
+       %y = tail call double @__nv_nearbyint(double %x) nounwind readnone
        ret double %y
 }
 
@@ -325,76 +334,14 @@ define weak_odr double @atanh_f64(double %x) nounwind uwtable readnone alwaysinl
        ret double %y
 }
 
+define weak_odr i32 @halide_gpu_thread_barrier() nounwind uwtable alwaysinline {
+       call void @llvm.nvvm.barrier0() nounwind
+       ret i32 0
+}
+
 define weak_odr i32 @halide_ptx_trap() nounwind uwtable alwaysinline {
        tail call void asm sideeffect "
        trap;
        ", ""() nounwind
        ret i32 0
 }
-
-; llvm doesn't expose dot product instructions as intrinsics
-define weak_odr i32 @dp4a_s32_s32(<4 x i8> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i8> %a to i32
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp4a.s32.s32    $0, $1, $2, $3;", "=r,r,r,r"(i32 %a_32, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp4a_s32_u32(<4 x i8> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i8> %a to i32
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp4a.s32.u32    $0, $1, $2, $3;", "=r,r,r,r"(i32 %a_32, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp4a_u32_s32(<4 x i8> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i8> %a to i32
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp4a.u32.s32    $0, $1, $2, $3;", "=r,r,r,r"(i32 %a_32, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp4a_u32_u32(<4 x i8> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i8> %a to i32
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp4a.u32.u32    $0, $1, $2, $3;", "=r,r,r,r"(i32 %a_32, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-
-define weak_odr i32 @dp2a_s32_s32(<4 x i16> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i16> %a to <2 x i32>
-       %a_lo = extractelement <2 x i32> %a_32, i32 0
-       %a_hi = extractelement <2 x i32> %a_32, i32 1
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp2a.lo.s32.s32    $0, $1, $3, $4; dp2a.hi.s32.s32    $0, $2, $3, $0;", "=r,r,r,r,r"(i32 %a_lo, i32 %a_hi, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp2a_s32_u32(<4 x i16> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i16> %a to <2 x i32>
-       %a_lo = extractelement <2 x i32> %a_32, i32 0
-       %a_hi = extractelement <2 x i32> %a_32, i32 1
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp2a.lo.s32.u32    $0, $1, $3, $4; dp2a.hi.s32.u32    $0, $2, $3, $0;", "=r,r,r,r,r"(i32 %a_lo, i32 %a_hi, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp2a_u32_s32(<4 x i16> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i16> %a to <2 x i32>
-       %a_lo = extractelement <2 x i32> %a_32, i32 0
-       %a_hi = extractelement <2 x i32> %a_32, i32 1
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp2a.lo.u32.s32    $0, $1, $3, $4; dp2a.hi.u32.s32    $0, $2, $3, $0;", "=r,r,r,r,r"(i32 %a_lo, i32 %a_hi, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-
-define weak_odr i32 @dp2a_u32_u32(<4 x i16> %a, <4 x i8> %b, i32 %i) nounwind readnone alwaysinline {
-       %a_32 = bitcast <4 x i16> %a to <2 x i32>
-       %a_lo = extractelement <2 x i32> %a_32, i32 0
-       %a_hi = extractelement <2 x i32> %a_32, i32 1
-       %b_32 = bitcast <4 x i8> %b to i32
-       %d = tail call i32 asm "dp2a.lo.u32.u32    $0, $1, $3, $4; dp2a.hi.u32.u32    $0, $2, $3, $0;", "=r,r,r,r,r"(i32 %a_lo, i32 %a_hi, i32 %b_32, i32 %i) nounwind readnone
-       ret i32 %d
-}
-

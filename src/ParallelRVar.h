@@ -7,12 +7,10 @@
  * definition across a reduction variable.
  */
 
-#include <string>
+#include "Function.h"
 
 namespace Halide {
 namespace Internal {
-
-class Definition;
 
 /** Returns whether or not Halide can prove that it is safe to
  * parallelize an update definition across a specific variable. If
@@ -23,7 +21,7 @@ bool can_parallelize_rvar(const std::string &rvar,
                           const std::string &func,
                           const Definition &r);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

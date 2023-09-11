@@ -3,12 +3,11 @@
 extern "C" {
 
 // These need to inline, otherwise the extern call with the ptr
-// parameter breaks a lot of optimizations, but needs to be WEAK
-// so that Codegen_LLVM can find an instance of the Function to insert.
-WEAK_INLINE int _halide_prefetch(const void *ptr) {
-    constexpr int rw = 0;        // 1 = write, 0 = read
-    constexpr int locality = 0;  // 0 = no temporal locality, 3 = high temporal locality
-    __builtin_prefetch(ptr, rw, locality);
+// parameter breaks a lot of optimizations.
+__attribute__((always_inline))
+WEAK int _halide_prefetch(const void *ptr) {
+    __builtin_prefetch(ptr, 1, 3);
     return 0;
 }
+
 }

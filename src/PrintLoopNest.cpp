@@ -1,21 +1,14 @@
 #include "PrintLoopNest.h"
-#include "AllocationBoundsInference.h"
-#include "Bounds.h"
-#include "BoundsInference.h"
+#include "DeepCopy.h"
 #include "FindCalls.h"
-#include "Func.h"
 #include "Function.h"
-#include "IRPrinter.h"
+#include "Func.h"
 #include "RealizationOrder.h"
-#include "RemoveExternLoops.h"
-#include "RemoveUndef.h"
+#include "IRPrinter.h"
 #include "ScheduleFunctions.h"
 #include "Simplify.h"
-#include "SimplifyCorrelatedDifferences.h"
 #include "SimplifySpecializations.h"
-#include "SlidingWindow.h"
 #include "Target.h"
-#include "UniquifyVariableNames.h"
 #include "WrapCalls.h"
 
 #include <tuple>
@@ -23,29 +16,27 @@
 namespace Halide {
 namespace Internal {
 
-using std::map;
 using std::string;
 using std::vector;
-
-namespace {
+using std::map;
 
 class PrintLoopNest : public IRVisitor {
 public:
-    PrintLoopNest(std::ostream &output, const map<string, Function> &e)
-        : out(output), env(e) {
-    }
-
+    PrintLoopNest(std::ostream &output, const map<string, Function> &e) :
+        out(output), env(e), indent(0) {}
 private:
     std::ostream &out;
     const map<string, Function> &env;
-    int indent = 0;
+    int indent;
 
     Scope<Expr> constants;
 
     using IRVisitor::visit;
 
-    Indentation get_indent() const {
-        return Indentation{indent};
+    void do_indent() {
+        for (int i = 0; i < indent; i++) {
+            out << ' ';
+        }
     }
 
     string simplify_var_name(const string &s) {
@@ -84,10 +75,10 @@ private:
         return trimmed_name.str();
     }
 
-    void visit(const For *op) override {
-        string simplified_loop_var_name = simplify_var_name(op->name);
+    void visit(const For *op) {
+        do_indent();
 
-        out << get_indent() << op->for_type << " " << simplified_loop_var_name;
+        out << op->for_type << ' ' << simplify_var_name(op->name);
 
         // If the min or extent are constants, print them. At this
         // stage they're all variables.
@@ -108,22 +99,20 @@ private:
             out << " in [" << min_val << ", " << max_val << "]";
         }
 
-        out << op->device_api;
-
         out << ":\n";
         indent += 2;
         op->body.accept(this);
         indent -= 2;
     }
 
-    void visit(const Realize *op) override {
+    void visit(const Realize *op) {
         // If the storage and compute levels for this function are
         // distinct, print the store level too.
         auto it = env.find(op->name);
         if (it != env.end() &&
             !(it->second.schedule().store_level() ==
               it->second.schedule().compute_level())) {
-            out << get_indent();
+            do_indent();
             out << "store " << simplify_func_name(op->name) << ":\n";
             indent += 2;
             op->body.accept(this);
@@ -133,8 +122,8 @@ private:
         }
     }
 
-    void visit(const ProducerConsumer *op) override {
-        out << get_indent();
+    void visit(const ProducerConsumer *op) {
+        do_indent();
         if (op->is_producer) {
             out << "produce " << simplify_func_name(op->name) << ":\n";
         } else {
@@ -145,11 +134,12 @@ private:
         indent -= 2;
     }
 
-    void visit(const Provide *op) override {
-        out << get_indent() << simplify_func_name(op->name) << "(...) = ...\n";
+    void visit(const Provide *op) {
+        do_indent();
+        out << simplify_func_name(op->name) << "(...) = ...\n";
     }
 
-    void visit(const LetStmt *op) override {
+    void visit(const LetStmt *op) {
         if (is_const(op->value)) {
             constants.push(op->name, op->value);
             op->body.accept(this);
@@ -160,30 +150,30 @@ private:
     }
 };
 
-}  // namespace
-
 string print_loop_nest(const vector<Function> &output_funcs) {
     // Do the first part of lowering:
 
-    // Create a deep-copy of the entire graph of Funcs.
-    auto [outputs, env] = deep_copy(output_funcs, build_environment(output_funcs));
-
-    // Output functions should all be computed and stored at root.
-    for (const Function &f : outputs) {
-        Func(f).compute_root().store_root();
+    // Compute an environment
+    map<string, Function> env;
+    for (Function f : output_funcs) {
+        map<string, Function> more_funcs = find_transitive_calls(f);
+        env.insert(more_funcs.begin(), more_funcs.end());
     }
 
-    // Finalize all the LoopLevels
-    for (auto &iter : env) {
-        iter.second.lock_loop_levels();
+    // Create a deep-copy of the entire graph of Funcs.
+    vector<Function> outputs;
+    std::tie(outputs, env) = deep_copy(output_funcs, env);
+
+    // Output functions should all be computed and stored at root.
+    for (Function f: outputs) {
+        Func(f).compute_root().store_root();
     }
 
     // Substitute in wrapper Funcs
     env = wrap_func_calls(env);
 
-    // Compute a realization order and determine group of functions which loops
-    // are to be fused together
-    auto [order, fused_groups] = realization_order(outputs, env);
+    // Compute a realization order
+    vector<string> order = realization_order(outputs, env);
 
     // Try to simplify the RHS/LHS of a function definition by propagating its
     // specializations' conditions
@@ -198,23 +188,7 @@ string print_loop_nest(const vector<Function> &output_funcs) {
 
     bool any_memoized = false;
     // Schedule the functions.
-    Stmt s = schedule_functions(outputs, fused_groups, env, target, any_memoized);
-
-    // Compute the maximum and minimum possible value of each
-    // function. Used in later bounds inference passes.
-    FuncValueBounds func_bounds = compute_function_value_bounds(order, env);
-
-    // This pass injects nested definitions of variable names, so we
-    // can't simplify statements from here until we fix them up. (We
-    // can still simplify Exprs).
-    s = bounds_inference(s, outputs, order, fused_groups, env, func_bounds, target);
-    s = remove_extern_loops(s);
-    s = sliding_window(s, env);
-    s = simplify_correlated_differences(s);
-    s = allocation_bounds_inference(s, env, func_bounds);
-    s = remove_undef(s);
-    s = uniquify_variable_names(s);
-    s = simplify(s, false);
+    Stmt s = schedule_functions(outputs, order, env, target, any_memoized);
 
     // Now convert that to pseudocode
     std::ostringstream sstr;
@@ -223,5 +197,5 @@ string print_loop_nest(const vector<Function> &output_funcs) {
     return sstr.str();
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

@@ -1,11 +1,10 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
-#include <algorithm>
 #include <cstdio>
 #include <memory>
+#include <algorithm>
+#include "benchmark.h"
 
 using namespace Halide;
-using namespace Halide::Tools;
 
 double test_copy(Buffer<uint8_t> src, Buffer<uint8_t> dst) {
     Var x, y, c;
@@ -37,7 +36,7 @@ double test_copy(Buffer<uint8_t> src, Buffer<uint8_t> dst) {
 
     f.realize(dst);
 
-    return benchmark([&]() { return f.realize(dst); });
+    return benchmark(5, 10, [&]() { return f.realize(dst); });
 }
 
 Buffer<uint8_t> make_packed(uint8_t *host, int W, int H) {
@@ -49,23 +48,16 @@ Buffer<uint8_t> make_planar(uint8_t *host, int W, int H) {
 }
 
 int main(int argc, char **argv) {
-    Target target = get_jit_target_from_environment();
-    if (target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
 
-    const int W = 1 << 11, H = 1 << 11;
+    const int W = 1<<11, H = 1<<11;
 
     // Allocate two 4 megapixel, 3 channel, 8-bit images -- input and output
     uint8_t *storage_1(new uint8_t[W * H * 3 + 32]);
     uint8_t *storage_2(new uint8_t[W * H * 3 + 32]);
 
     uint8_t *ptr_1 = storage_1, *ptr_2 = storage_2;
-    while ((size_t)ptr_1 & 0x1f)
-        ptr_1++;
-    while ((size_t)ptr_2 & 0x1f)
-        ptr_2++;
+    while ((size_t)ptr_1 & 0x1f) ptr_1 ++;
+    while ((size_t)ptr_2 & 0x1f) ptr_2 ++;
 
     double t_packed_packed = test_copy(make_packed(ptr_1, W, H),
                                        make_packed(ptr_2, W, H));
@@ -75,6 +67,9 @@ int main(int argc, char **argv) {
                                        make_packed(ptr_2, W, H));
     double t_planar_planar = test_copy(make_planar(ptr_1, W, H),
                                        make_planar(ptr_2, W, H));
+
+
+
 
     delete[] storage_1;
     delete[] storage_2;
@@ -92,8 +87,11 @@ int main(int argc, char **argv) {
                t_planar_packed,
                t_packed_planar);
 
-        return 1;
+        return -1;
     }
+
+
+
 
     printf("Success!\n");
     return 0;

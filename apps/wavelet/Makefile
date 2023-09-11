@@ -1,42 +1,48 @@
 include ../support/Makefile.inc
 
-.PHONY: build clean test
+BIN ?= bin
 
-build: $(BIN)/$(HL_TARGET)/wavelet
+# If HL_TARGET isn't set, use host
+HL_TARGET ?= host
+
+all: $(BIN)/wavelet
 
 clean:
 	@rm -rf $(BIN)
 
-# By default, %.generator is produced by building %_generator.cpp
-$(GENERATOR_BIN)/%.generator: %_generator.cpp $(GENERATOR_DEPS)
+# By default, %_exec is produced by building %_generator.cpp
+$(BIN)/%_exec: %_generator.cpp $(GENERATOR_DEPS)
 	@echo Building Generator $(filter %_generator.cpp,$^)
-	@mkdir -p $(@D)
-	@$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) $(LIBHALIDE_LDFLAGS) -o $@
+	@mkdir -p $(BIN)
+	@$(CXX) $(CXXFLAGS) -fno-rtti $(filter-out %.h,$^) $(LDFLAGS) -o $@
 
-# Can't have multiple wildcards in Make, so we'll use a macro
-# to stamp out all the rules we need
-VARIANTS = daubechies_x haar_x inverse_daubechies_x inverse_haar_x
+# By default, %.a/.h are produced by executing %_exec
+$(BIN)/%.a $(BIN)/%.h: $(BIN)/%_exec
+	@echo Running Generator $<
+	@mkdir -p $(BIN)
+	@$< -g $(notdir $*) -o $(BIN) target=$(HL_TARGET)-no_runtime
 
-define GEN_RULE
-$$(BIN)/%/$(1).a: $$(GENERATOR_BIN)/$(1).generator
-	@echo Running Generator $$<
-	@mkdir -p $$(@D)
-	@$$< -g $(1) -o $$(@D) target=$$*-no_runtime
-endef
+$(BIN)/runtime_$(HL_TARGET).a: $(BIN)/haar_x_exec
+	@echo Compiling Halide runtime for target $(HL_TARGET)
+	@mkdir -p $(BIN)
+	@$< -r runtime_$(HL_TARGET) -o $(BIN) target=$(HL_TARGET)
 
-$(foreach V,$(VARIANTS),$(eval $(call GEN_RULE,$(V))))
+HL_MODULES = \
+	$(BIN)/daubechies_x.a \
+	$(BIN)/haar_x.a \
+	$(BIN)/inverse_daubechies_x.a \
+	$(BIN)/inverse_haar_x.a \
+	$(BIN)/runtime_$(HL_TARGET).a
 
-$(BIN)/%/runtime.a: $(GENERATOR_BIN)/haar_x.generator
-	@echo Compiling Halide runtime for target $*
-	@mkdir -p $(@D)
-	@$< -r runtime -o $(@D) target=$*
+$(BIN)/wavelet.a: wavelet.cpp $(HL_MODULES)
+	@$(CXX) $(CXXFLAGS) $(IMAGE_IO_CXX_FLAGS) -I$(BIN) -c $< -o $@
 
-$(BIN)/%/wavelet: wavelet.cpp $(foreach V,$(VARIANTS),$(BIN)/%/$(V).a) $(BIN)/%/runtime.a
-	@$(CXX) $(CXXFLAGS) $(IMAGE_IO_CXX_FLAGS) -I$(BIN)/$* $^ $(IMAGE_IO_LIBS) $(LDFLAGS) -o $@
+$(BIN)/wavelet: $(BIN)/wavelet.a
+	@$(CXX) $(CXXFLAGS) $^ $(HL_MODULES) $(IMAGE_IO_LIBS) $(LDFLAGS) -o $@
 
-test: $(BIN)/$(HL_TARGET)/wavelet
+test: $(BIN)/wavelet
 	@echo Testing wavelet...
-	@$< ../images/gray.png $(<D)
+	@$< ../images/gray.png $(BIN)
 
 # Don't auto-delete the generators.
 .SECONDARY:

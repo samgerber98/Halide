@@ -1,31 +1,21 @@
 #ifndef HALIDE_SCOPED_SPIN_LOCK_H
 #define HALIDE_SCOPED_SPIN_LOCK_H
 
-namespace Halide {
-namespace Runtime {
-namespace Internal {
+namespace Halide { namespace Runtime { namespace Internal {
 
 // An RAII spin lock.
 struct ScopedSpinLock {
-    // Note that __atomic_test_and_set() requires use of a char (or bool)
-    typedef char AtomicFlag;
+    volatile int *lock;
 
-    volatile AtomicFlag *const flag;
-
-    ALWAYS_INLINE explicit ScopedSpinLock(volatile AtomicFlag *flag)
-        : flag(flag) {
-        while (__atomic_test_and_set(flag, __ATOMIC_ACQUIRE)) {
-            // nothing
-        }
+    ScopedSpinLock(volatile int *l) __attribute__((always_inline)) : lock(l) {
+        while (__sync_lock_test_and_set(lock, 1)) { }
     }
 
-    ALWAYS_INLINE ~ScopedSpinLock() {
-        __atomic_clear(flag, __ATOMIC_RELEASE);
+    ~ScopedSpinLock() __attribute__((always_inline)) {
+        __sync_lock_release(lock);
     }
 };
 
-}  // namespace Internal
-}  // namespace Runtime
-}  // namespace Halide
+}}} // namespace Halide::Runtime::Internal
 
 #endif

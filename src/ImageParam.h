@@ -6,56 +6,48 @@
  * Classes for declaring image parameters to halide pipelines
  */
 
-#include <utility>
-
-#include "Func.h"
-#include "OutputImageParam.h"
 #include "Var.h"
+#include "OutputImageParam.h"
+#include "Func.h"
 
 namespace Halide {
 
-namespace Internal {
-template<typename T2>
-class GeneratorInput_Buffer;
-}
-
 /** An Image parameter to a halide pipeline. E.g., the input image. */
 class ImageParam : public OutputImageParam {
-    template<typename T2>
-    friend class ::Halide::Internal::GeneratorInput_Buffer;
 
-    // Only for use of Generator
-    ImageParam(const Internal::Parameter &p, Func f)
-        : OutputImageParam(p, Argument::InputBuffer, std::move(f)) {
-    }
+    /** Func representation of the ImageParam.
+     * All call to ImageParam is equivalent to call to its intrinsic Func
+     * representation. */
+    Func func;
 
     /** Helper function to initialize the Func representation of this ImageParam. */
-    Func create_func() const;
+    EXPORT void init_func();
 
 public:
+
     /** Construct a nullptr image parameter handle. */
-    ImageParam() = default;
+    ImageParam() : OutputImageParam() {}
 
     /** Construct an image parameter of the given type and
      * dimensionality, with an auto-generated unique name. */
-    ImageParam(Type t, int d);
+    EXPORT ImageParam(Type t, int d);
 
     /** Construct an image parameter of the given type and
      * dimensionality, with the given name */
-    ImageParam(Type t, int d, const std::string &n);
+    EXPORT ImageParam(Type t, int d, const std::string &n);
 
     /** Bind an Image to this ImageParam. Only relevant for jitting */
     // @{
-    void set(const Buffer<> &im);
+    EXPORT void set(Buffer<> im);
     // @}
 
     /** Get a reference to the Buffer bound to this ImageParam. Only relevant for jitting. */
     // @{
-    Buffer<> get() const;
+    EXPORT Buffer<> get() const;
     // @}
 
     /** Unbind any bound Buffer */
-    void reset();
+    EXPORT void reset();
 
     /** Construct an expression which loads from this image
      * parameter. The location is extended with enough implicit
@@ -63,12 +55,12 @@ public:
      * (see \ref Var::implicit)
      */
     // @{
-    template<typename... Args>
-    HALIDE_NO_USER_CODE_INLINE Expr operator()(Args &&...args) const {
+    template <typename... Args>
+    NO_INLINE Expr operator()(Args&&... args) const {
         return func(std::forward<Args>(args)...);
     }
-    Expr operator()(std::vector<Expr>) const;
-    Expr operator()(std::vector<Var>) const;
+    EXPORT Expr operator()(std::vector<Expr>) const;
+    EXPORT Expr operator()(std::vector<Var>) const;
     // @}
 
     /** Return the intrinsic Func representation of this ImageParam. This allows
@@ -84,7 +76,8 @@ public:
      * '_0' represents the first dimension of the Func, while _1 represents the
      * second dimension of the Func.
      */
-    operator Func() const;
+    EXPORT operator Func() const;
+
 
     /** Creates and returns a new Func that wraps this ImageParam. During
      * compilation, Halide will replace calls to this ImageParam with calls
@@ -116,25 +109,20 @@ public:
      output(x, y) = img(y, x);
      Var tx, ty;
      output.compute_root().gpu_tile(x, y, tx, ty, 8, 8);
-     img.in().compute_at(output, x).unroll(_0, 2).unroll(_1, 2).gpu_threads(_0, _1);
+     img.in().compute_at(output, x).unroll(_0, 2).unroll(_1, 2).gpu_threads(x, y);
      \endcode
      *
-     * Note that we use implicit vars to name the dimensions of the wrapper Func.
-     * See \ref Func::in for more possible use cases of the 'in()' directive.
+     * Note that we use implicit vars to name the dimensions of the wrapper Func
+     * (See \ref ImageParam::in for more details). See \ref Func::in for more
+     * possible use cases of the 'in()' directive.
      */
     // @{
-    Func in(const Func &f);
-    Func in(const std::vector<Func> &fs);
-    Func in();
+    EXPORT Func in(const Func &f);
+    EXPORT Func in(const std::vector<Func> &fs);
+    EXPORT Func in();
     // @}
-
-    /** Trace all loads from this ImageParam by emitting calls to halide_trace. */
-    void trace_loads();
-
-    /** Add a trace tag to this ImageParam's Func. */
-    ImageParam &add_trace_tag(const std::string &trace_tag);
 };
 
-}  // namespace Halide
+}
 
 #endif

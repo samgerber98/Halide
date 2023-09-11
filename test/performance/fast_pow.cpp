@@ -1,39 +1,33 @@
 #include "Halide.h"
-#include "halide_benchmark.h"
-#include <algorithm>
 #include <cstdio>
+#include <algorithm>
+#include "benchmark.h"
 
 using namespace Halide;
-using namespace Halide::Tools;
 
-// powf() is a macro in some environments, so always wrap it
-extern "C" HALIDE_EXPORT_SYMBOL float pow_ref(float x, float y) {
+// 32-bit windows defines powf as a macro, which won't work for us.
+#ifdef _WIN32
+extern "C" __declspec(dllexport) float pow_ref(float x, float y) {
+    return pow(x, y);
+}
+#else
+extern "C" float pow_ref(float x, float y) {
     return powf(x, y);
 }
+#endif
+
 HalideExtern_2(float, pow_ref, float, float);
 
 int main(int argc, char **argv) {
-    Target host = get_host_target();
-    Target hl_target = get_target_from_environment();
-    Target hl_jit_target = get_jit_target_from_environment();
-    printf("host is:          %s\n", host.to_string().c_str());
-    printf("HL_TARGET is:     %s\n", hl_target.to_string().c_str());
-    printf("HL_JIT_TARGET is: %s\n", hl_jit_target.to_string().c_str());
-
-    if (hl_jit_target.arch == Target::WebAssembly) {
-        printf("[SKIP] Performance tests are meaningless and/or misleading under WebAssembly interpreter.\n");
-        return 0;
-    }
-
     Func f, g, h;
     Var x, y;
 
     Param<int> pows_per_pixel;
 
     RDom s(0, pows_per_pixel);
-    f(x, y) = sum(pow_ref((x + 1) / 512.0f, (y + 1 + s) / 512.0f));
-    g(x, y) = sum(pow((x + 1) / 512.0f, (y + 1 + s) / 512.0f));
-    h(x, y) = sum(fast_pow((x + 1) / 512.0f, (y + 1 + s) / 512.0f));
+    f(x, y) = sum(pow_ref((x+1)/512.0f, (y+1+s)/512.0f));
+    g(x, y) = sum(pow((x+1)/512.0f, (y+1+s)/512.0f));
+    h(x, y) = sum(fast_pow((x+1)/512.0f, (y+1+s)/512.0f));
     f.vectorize(x, 8);
     g.vectorize(x, 8);
     h.vectorize(x, 8);
@@ -48,14 +42,16 @@ int main(int argc, char **argv) {
     g.realize(fast_result);
     h.realize(faster_result);
 
+    const int trials = 10;
+    const int iterations = 10;
     pows_per_pixel.set(20);
 
     // All profiling runs are done into the same buffer, to avoid
     // cache weirdness.
     Buffer<float> timing_scratch(256, 256);
-    double t1 = 1e3 * benchmark([&]() { f.realize(timing_scratch); });
-    double t2 = 1e3 * benchmark([&]() { g.realize(timing_scratch); });
-    double t3 = 1e3 * benchmark([&]() { h.realize(timing_scratch); });
+    double t1 = 1e3 * benchmark(3, 3, [&]() { f.realize(timing_scratch); });
+    double t2 = 1e3 * benchmark(trials, iterations, [&]() { g.realize(timing_scratch); });
+    double t3 = 1e3 * benchmark(trials, iterations, [&]() { h.realize(timing_scratch); });
 
     RDom r(correct_result);
     Func fast_error, faster_error;
@@ -69,36 +65,37 @@ int main(int argc, char **argv) {
 
     int timing_N = timing_scratch.width() * timing_scratch.height() * 10;
     int correctness_N = fast_result.width() * fast_result.height();
-    fast_err() = sqrt(fast_err() / correctness_N);
-    faster_err() = sqrt(faster_err() / correctness_N);
+    fast_err(0) = sqrt(fast_err(0)/correctness_N);
+    faster_err(0) = sqrt(faster_err(0)/correctness_N);
 
     printf("powf: %f ns per pixel\n"
            "Halide's pow: %f ns per pixel (rms error = %0.10f)\n"
            "Halide's fast_pow: %f ns per pixel (rms error = %0.10f)\n",
-           1000000 * t1 / timing_N,
-           1000000 * t2 / timing_N, fast_err(),
-           1000000 * t3 / timing_N, faster_err());
+           1000000*t1 / timing_N,
+           1000000*t2 / timing_N, fast_err(0),
+           1000000*t3 / timing_N, faster_err(0));
 
-    if (fast_err() > 0.000001) {
+    if (fast_err(0) > 0.000001) {
         printf("Error for pow too large\n");
-        return 1;
+        return -1;
     }
 
-    if (faster_err() > 0.0001) {
+    if (faster_err(0) > 0.0001) {
         printf("Error for fast_pow too large\n");
-        return 1;
+        return -1;
     }
 
     if (t1 < t2) {
         printf("powf is faster than Halide's pow\n");
-        return 1;
+        return -1;
     }
 
-    if (t2 * 1.5 < t3) {
+    if (t2*1.5 < t3) {
         printf("pow is more than 1.5x faster than fast_pow\n");
-        return 1;
+        return -1;
     }
 
     printf("Success!\n");
+
     return 0;
 }

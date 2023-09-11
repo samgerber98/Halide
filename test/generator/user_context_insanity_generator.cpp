@@ -4,23 +4,24 @@ namespace {
 
 class UserContextInsanity : public Halide::Generator<UserContextInsanity> {
 public:
-    Input<Buffer<float, 2>> input{"input"};
-    Output<Buffer<float, 2>> output{"output"};
+    ImageParam input{ Float(32), 2, "input" };
 
-    void generate() {
+    Func build() {
         Var x, y;
 
         Func g;
         g(x, y) = input(x, y) * 2;
         g.compute_root();
 
-        output(x, y) = g(x, y);
+        Func f;
+        f(x, y) = g(x, y);
 
-        output.parallel(y);
-        output.trace_stores();
+        f.parallel(y);
+        f.trace_stores();
+        return f;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<UserContextInsanity> register_my_gen{"user_context_insanity"};
 
-HALIDE_REGISTER_GENERATOR(UserContextInsanity, user_context_insanity)
+}  // namespace

@@ -1,11 +1,8 @@
-#include "metal_objc_platform_dependent.h"
 #include "HalideRuntime.h"
 #include "objc_support.h"
+#include "metal_objc_platform_dependent.h"
 
-namespace Halide {
-namespace Runtime {
-namespace Internal {
-namespace Metal {
+namespace Halide { namespace Runtime { namespace Internal { namespace Metal {
 
 WEAK void dispatch_threadgroups(mtl_compute_command_encoder *encoder,
                                 int32_t blocks_x, int32_t blocks_y, int32_t blocks_z,
@@ -50,7 +47,4 @@ WEAK void dispatch_threadgroups(mtl_compute_command_encoder *encoder,
 #endif
 }
 
-}  // namespace Metal
-}  // namespace Internal
-}  // namespace Runtime
-}  // namespace Halide
+}}}}

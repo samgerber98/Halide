@@ -24,9 +24,7 @@ int main(int argc, char **argv) {
 
         // Reorder g
         g.reorder(y, x);
-        // It is legal to reorder r1.x and r1.y
-        // because stage g.update(0) is associative.
-        g.update(0).reorder(r1.y, y, x, r1.x);
+        g.update(0).reorder(r1.x, y, x, r1.y);
         g.update(1).reorder(r2.x, x, r2.y, r2.z);
         g.compute_root();
         f.compute_root();
@@ -38,22 +36,22 @@ int main(int argc, char **argv) {
 
         if (err != 0) {
             printf("Reordering rvars affected the meaning!\n");
-            return 1;
+            return -1;
         }
     }
 
     // And now, a practical use-case for reorder rvars
     {
         Func input;
-        input(x, y) = x * y;
+        input(x, y) = x*y;
 
         // Compute summed-area table
         Func sat;
         sat(x, y) = input(x, y);
 
         RDom r(1, 99);
-        sat(x, r) += sat(x, r - 1);
-        sat(r, y) += sat(r - 1, y);
+        sat(x, r) += sat(x, r-1);
+        sat(r, y) += sat(r-1, y);
 
         // Walk down the columns in vectors.
         Var xo, xi;
@@ -63,7 +61,8 @@ int main(int argc, char **argv) {
         // over y outside of the loop over r, which is the default.
         sat.update(1).parallel(y);
 
-        sat.realize({100, 100});
+        sat.realize(100, 100);
+
     }
 
     printf("Success!\n");

@@ -4,71 +4,52 @@ using namespace Halide;
 
 namespace {
 
-void set_alignment_and_bounds(OutputImageParam p, int size) {
-    p.set_host_alignment(16)
-        .dim(0)
-        .set_bounds(0, size)
-        .dim(1)
-        .set_stride(size);
-}
-
 class MatMul : public Halide::Generator<MatMul> {
 public:
-    GeneratorParam<int> size{"size", 1024};
-    Input<Buffer<float, 2>> A{"A"};
-    Input<Buffer<float, 2>> B{"B"};
 
-    Output<Buffer<float, 2>> out{"out"};
+    GeneratorParam<int>   size {"size", 1024};
+    ImageParam            A {Float(32), 2, "A"};
+    ImageParam            B {Float(32), 2, "B"};
 
-    void generate() {
-        // 688 us on an RTX 2060
-        // cublas is 512 us on the same card
-
-        Var x("x"), y("y"), p("p");
+    Func build() {
+        Var x("x"), y("y");
 
         Func prod("prod");
         RDom r(0, size);
         prod(x, y) += A(x, r) * B(r, y);
-        out(x, y) = prod(x, y);
 
-        Var xi, yi, xio, xii, yii, xo, yo, x_pair, xiio, ty;
-        RVar rxo, rxi;
+        Var xi, yi, xio, xii, yii, xo;
+        Func out = prod.in();
+        out.bound(x, 0, size)
+            .bound(y, 0, size)
+            .tile(x, y, xi, yi, 8*32, 8)
+            .split(xi, xio, xii, 32)
+            .reorder(xio, yi, xii, x, y)
+            .unroll(xio)
+            .unroll(yi)
+            .gpu_blocks(x, y).gpu_threads(xii);
+        prod.compute_at(out, xii)
+            .unroll(x)
+            .unroll(y)
+            .update()
+            .unroll(r.x, 2)
+            .reorder(y, x, r.x)
+            .unroll(x)
+            .unroll(y);
+        B.in()
+            .compute_at(prod, y)
+            .vectorize(B.in().args()[0]);
 
-        if (!using_autoscheduler()) {
-            out.bound(x, 0, size)
-                .bound(y, 0, size)
-                .tile(x, y, xi, yi, 64, 16)
-                .tile(xi, yi, xii, yii, 4, 8)
-                .gpu_blocks(x, y)
-                .gpu_threads(xi, yi)
-                .unroll(xii)
-                .unroll(yii);
-            prod.compute_at(out, xi)
-                .vectorize(x)
-                .unroll(y)
-                .update()
-                .reorder(x, y, r)
-                .vectorize(x)
-                .unroll(y)
-                .unroll(r, 8);
-            A.in().compute_at(prod, r).vectorize(_0).unroll(_1);
-            B.in().compute_at(prod, r).vectorize(_0).unroll(_1);
-
-            set_alignment_and_bounds(A, size);
-            set_alignment_and_bounds(B, size);
-            set_alignment_and_bounds(out, size);
-        } else {
-            A.dim(0).set_estimate(0, size).dim(1).set_estimate(0, size);
-            B.dim(0).set_estimate(0, size).dim(1).set_estimate(0, size);
+        OutputImageParam bufs[] = {A, B, prod.output_buffer()};
+        for (auto &buf : bufs) {
+            buf.set_host_alignment(16)
+                .dim(0).set_bounds(0, size)
+                .dim(1).set_stride(size);
         }
 
-        // Always specify bounds for outputs, whether autoscheduled or not
-        out
-            .bound(x, 0, size)
-            .bound(y, 0, size);
+        return out;
     }
 };
 
-}  // namespace
-
-HALIDE_REGISTER_GENERATOR(MatMul, mat_mul)
+Halide::RegisterGenerator<MatMul> register_me{"mat_mul"};
+}

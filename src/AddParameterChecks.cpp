@@ -1,18 +1,16 @@
 #include "AddParameterChecks.h"
-#include "IROperator.h"
 #include "IRVisitor.h"
 #include "Substitute.h"
 #include "Target.h"
+#include "IROperator.h"
 
 namespace Halide {
 namespace Internal {
 
 using std::map;
-using std::pair;
 using std::string;
 using std::vector;
-
-namespace {
+using std::pair;
 
 // Find all the externally referenced scalar parameters
 class FindParameters : public IRGraphVisitor {
@@ -21,19 +19,16 @@ public:
 
     using IRGraphVisitor::visit;
 
-    void visit(const Variable *op) override {
+    void visit(const Variable *op) {
         if (op->param.defined()) {
             params[op->name] = op->param;
         }
     }
 };
 
-}  // namespace
-
 // Insert checks to make sure that parameters are within their
 // declared range.
-Stmt add_parameter_checks(const vector<Stmt> &preconditions, Stmt s, const Target &t) {
-
+Stmt add_parameter_checks(Stmt s, const Target &t) {
     // First, find all the parameters
     FindParameters finder;
     s.accept(&finder);
@@ -54,8 +49,8 @@ Stmt add_parameter_checks(const vector<Stmt> &preconditions, Stmt s, const Targe
         Parameter param = i.second;
 
         if (!param.is_buffer() &&
-            (param.min_value().defined() ||
-             param.max_value().defined())) {
+            (param.get_min_value().defined() ||
+             param.get_max_value().defined())) {
 
             string constrained_name = i.first + ".constrained";
 
@@ -63,25 +58,27 @@ Stmt add_parameter_checks(const vector<Stmt> &preconditions, Stmt s, const Targe
             Expr constrained_value = Variable::make(param.type(), i.first, param);
             replace_with_constrained[i.first] = constrained_var;
 
-            if (param.min_value().defined()) {
+            if (param.get_min_value().defined()) {
                 ParamAssert p = {
-                    constrained_value >= param.min_value(),
-                    constrained_value, param.min_value(),
-                    param.name()};
+                    constrained_value >= param.get_min_value(),
+                    constrained_value, param.get_min_value(),
+                    param.name()
+                };
                 asserts.push_back(p);
-                constrained_value = max(constrained_value, param.min_value());
+                constrained_value = max(constrained_value, param.get_min_value());
             }
 
-            if (param.max_value().defined()) {
+            if (param.get_max_value().defined()) {
                 ParamAssert p = {
-                    constrained_value <= param.max_value(),
-                    constrained_value, param.max_value(),
-                    param.name()};
+                    constrained_value <= param.get_max_value(),
+                    constrained_value, param.get_max_value(),
+                    param.name()
+                };
                 asserts.push_back(p);
-                constrained_value = min(constrained_value, param.max_value());
+                constrained_value = min(constrained_value, param.get_max_value());
             }
 
-            lets.emplace_back(constrained_name, constrained_value);
+            lets.push_back({ constrained_name, constrained_value });
         }
     }
 
@@ -89,16 +86,21 @@ Stmt add_parameter_checks(const vector<Stmt> &preconditions, Stmt s, const Targe
     s = substitute(replace_with_constrained, s);
 
     // Inject the let statements
-    for (const auto &let : lets) {
-        s = LetStmt::make(let.first, let.second, s);
+    for (size_t i = 0; i < lets.size(); i++) {
+        s = LetStmt::make(lets[i].first, lets[i].second, s);
+    }
+
+    if (t.has_feature(Target::NoAsserts)) {
+        asserts.clear();
     }
 
     // Inject the assert statements
-    for (ParamAssert &p : asserts) {
+    for (size_t i = 0; i < asserts.size(); i++) {
+        ParamAssert p = asserts[i];
         // Upgrade the types to 64-bit versions for the error call
         Type wider = p.value.type().with_bits(64);
         p.limit_value = cast(wider, p.limit_value);
-        p.value = cast(wider, p.value);
+        p.value       = cast(wider, p.value);
 
         string error_call_name = "halide_error_param";
 
@@ -125,13 +127,10 @@ Stmt add_parameter_checks(const vector<Stmt> &preconditions, Stmt s, const Targe
         s = Block::make(AssertStmt::make(p.condition, error), s);
     }
 
-    // The unstructured assertions get checked first (because they
-    // have a custom error message associated with them), so prepend
-    // them last.
-    vector<Stmt> stmts = preconditions;
-    stmts.push_back(s);
-    return Block::make(stmts);
+    return s;
 }
 
-}  // namespace Internal
-}  // namespace Halide
+
+
+}
+}

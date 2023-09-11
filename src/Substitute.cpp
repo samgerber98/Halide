@@ -1,7 +1,7 @@
 #include "Substitute.h"
-#include "IREquality.h"
-#include "IRMutator.h"
 #include "Scope.h"
+#include "IRMutator.h"
+#include "IREquality.h"
 
 namespace Halide {
 namespace Internal {
@@ -9,11 +9,9 @@ namespace Internal {
 using std::map;
 using std::string;
 
-namespace {
-
 class Substitute : public IRMutator {
     const map<string, Expr> &replace;
-    Scope<> hidden;
+    Scope<int> hidden;
 
     Expr find_replacement(const string &s) {
         map<string, Expr>::const_iterator iter = replace.find(s);
@@ -25,80 +23,65 @@ class Substitute : public IRMutator {
     }
 
 public:
-    Substitute(const map<string, Expr> &m)
-        : replace(m) {
-    }
+    Substitute(const map<string, Expr> &m) : replace(m) {}
 
     using IRMutator::visit;
 
-    Expr visit(const Variable *v) override {
+    void visit(const Variable *v) {
         Expr r = find_replacement(v->name);
         if (r.defined()) {
-            return r;
+            expr = r;
         } else {
-            return v;
+            expr = v;
         }
     }
 
-    template<typename T>
-    auto visit_let(const T *op) -> decltype(op->body) {
-        decltype(op->body) orig = op;
+    void visit(const Let *op) {
+        Expr new_value = mutate(op->value);
+        hidden.push(op->name, 0);
+        Expr new_body = mutate(op->body);
+        hidden.pop(op->name);
 
-        struct Frame {
-            const T *op;
-            Expr new_value;
-            ScopedBinding<> bind;
-        };
-        std::vector<Frame> frames;
-        decltype(op->body) body;
-        bool values_unchanged = true;
-        do {
-            Expr new_value = mutate(op->value);
-            values_unchanged &= new_value.same_as(op->value);
-            frames.push_back(Frame{op, std::move(new_value), ScopedBinding<>(hidden, op->name)});
-            body = op->body;
-            op = body.template as<T>();
-        } while (op);
-
-        auto new_body = mutate(body);
-
-        if (values_unchanged &&
-            new_body.same_as(body)) {
-            return orig;
+        if (new_value.same_as(op->value) &&
+            new_body.same_as(op->body)) {
+            expr = op;
         } else {
-            for (auto it = frames.rbegin(); it != frames.rend(); it++) {
-                new_body = T::make(it->op->name, it->new_value, new_body);
-            }
-            return new_body;
+            expr = Let::make(op->name, new_value, new_body);
         }
     }
 
-    Expr visit(const Let *op) override {
-        return visit_let(op);
+    void visit(const LetStmt *op) {
+        Expr new_value = mutate(op->value);
+        hidden.push(op->name, 0);
+        Stmt new_body = mutate(op->body);
+        hidden.pop(op->name);
+
+        if (new_value.same_as(op->value) &&
+            new_body.same_as(op->body)) {
+            stmt = op;
+        } else {
+            stmt = LetStmt::make(op->name, new_value, new_body);
+        }
     }
 
-    Stmt visit(const LetStmt *op) override {
-        return visit_let(op);
-    }
+    void visit(const For *op) {
 
-    Stmt visit(const For *op) override {
         Expr new_min = mutate(op->min);
         Expr new_extent = mutate(op->extent);
-        hidden.push(op->name);
+        hidden.push(op->name, 0);
         Stmt new_body = mutate(op->body);
         hidden.pop(op->name);
 
         if (new_min.same_as(op->min) &&
             new_extent.same_as(op->extent) &&
             new_body.same_as(op->body)) {
-            return op;
+            stmt = op;
         } else {
-            return For::make(op->name, new_min, new_extent, op->for_type, op->device_api, new_body);
+            stmt = For::make(op->name, new_min, new_extent, op->for_type, op->device_api, new_body);
         }
     }
-};
 
-}  // namespace
+};
 
 Expr substitute(const string &name, const Expr &replacement, const Expr &expr) {
     map<string, Expr> m;
@@ -124,7 +107,6 @@ Stmt substitute(const map<string, Expr> &m, const Stmt &stmt) {
     return s.mutate(stmt);
 }
 
-namespace {
 
 class SubstituteExpr : public IRMutator {
 public:
@@ -132,7 +114,7 @@ public:
 
     using IRMutator::mutate;
 
-    Expr mutate(const Expr &e) override {
+    Expr mutate(Expr e) {
         if (equal(e, find)) {
             return replacement;
         } else {
@@ -140,8 +122,6 @@ public:
         }
     }
 };
-
-}  // namespace
 
 Expr substitute(const Expr &find, const Expr &replacement, const Expr &expr) {
     SubstituteExpr s;
@@ -157,8 +137,6 @@ Stmt substitute(const Expr &find, const Expr &replacement, const Stmt &stmt) {
     return s.mutate(stmt);
 }
 
-namespace {
-
 /** Substitute an expr for a var in a graph. */
 class GraphSubstitute : public IRGraphMutator {
     string var;
@@ -166,51 +144,34 @@ class GraphSubstitute : public IRGraphMutator {
 
     using IRGraphMutator::visit;
 
-    Expr visit(const Variable *op) override {
+    void visit(const Variable *op) {
         if (op->name == var) {
-            return value;
+            expr = value;
         } else {
-            return op;
-        }
-    }
-
-    Expr visit(const Let *op) override {
-        Expr new_value = mutate(op->value);
-        if (op->name == var) {
-            return Let::make(op->name, new_value, op->body);
-        } else {
-            return Let::make(op->name, new_value, mutate(op->body));
+            expr = op;
         }
     }
 
 public:
-    GraphSubstitute(const string &var, const Expr &value)
-        : var(var), value(value) {
-    }
+
+    GraphSubstitute(const string &var, const Expr &value) : var(var), value(value) {}
 };
 
 /** Substitute an Expr for another Expr in a graph. Unlike substitute,
  * this only checks for shallow equality. */
 class GraphSubstituteExpr : public IRGraphMutator {
     Expr find, replace;
-
 public:
+
     using IRGraphMutator::mutate;
 
-    Expr mutate(const Expr &e) override {
-        if (e.same_as(find)) {
-            return replace;
-        } else {
-            return IRGraphMutator::mutate(e);
-        }
+    Expr mutate(Expr e) {
+        if (e.same_as(find)) return replace;
+        return IRGraphMutator::mutate(e);
     }
 
-    GraphSubstituteExpr(const Expr &find, const Expr &replace)
-        : find(find), replace(replace) {
-    }
+    GraphSubstituteExpr(const Expr &find, const Expr &replace) : find(find), replace(replace) {}
 };
-
-}  // namespace
 
 Expr graph_substitute(const string &name, const Expr &replacement, const Expr &expr) {
     return GraphSubstitute(name, replacement).mutate(expr);
@@ -228,20 +189,16 @@ Stmt graph_substitute(const Expr &find, const Expr &replacement, const Stmt &stm
     return GraphSubstituteExpr(find, replacement).mutate(stmt);
 }
 
-namespace {
-
 class SubstituteInAllLets : public IRGraphMutator {
 
     using IRGraphMutator::visit;
 
-    Expr visit(const Let *op) override {
+    void visit(const Let *op) {
         Expr value = mutate(op->value);
         Expr body = mutate(op->body);
-        return graph_substitute(op->name, value, body);
+        expr = graph_substitute(op->name, value, body);
     }
 };
-
-}  // namespace
 
 Expr substitute_in_all_lets(const Expr &expr) {
     return SubstituteInAllLets().mutate(expr);
@@ -251,5 +208,5 @@ Stmt substitute_in_all_lets(const Stmt &stmt) {
     return SubstituteInAllLets().mutate(stmt);
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

@@ -1,5 +1,5 @@
-#include "Halide.h"
 #include <stdio.h>
+#include "Halide.h"
 
 using namespace Halide;
 
@@ -26,13 +26,14 @@ int main(int argc, char **argv) {
     // Bound it so the allocations go on the stack.
     k.bound(x, 0, 16);
 
-    Buffer<int> result = k.realize({16});
+    Buffer<int> result = k.realize(16);
     for (int i = 0; i < result.width(); i++) {
         if (result(i) != 2 * i) {
             printf("Error! Allocation did not get reused at %d (%d != %d)\n", i, result(i), 2 * i);
-            return 1;
+            return -1;
         }
     }
+
 
     printf("Success!\n");
     return 0;

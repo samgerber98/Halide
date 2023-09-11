@@ -4,27 +4,29 @@ namespace {
 
 class UserContext : public Halide::Generator<UserContext> {
 public:
-    Input<Buffer<float, 2>> input{"input"};
-    Output<Buffer<float, 2>> output{"output"};
+    ImageParam input{ Float(32), 2, "input" };
 
-    void generate() {
+    Func build() {
         Var x, y;
 
         Func g;
         g(x, y) = input(x, y) * 2;
         g.compute_root();
 
-        output(x, y) = g(x, y);
+        Func f;
+        f(x, y) = g(x, y);
 
-        output.parallel(y);
-        trace_pipeline();
+        f.parallel(y);
+        f.trace_stores();
 
         // This test won't work in the profiler, because the profiler
         // insists on calling malloc with nullptr user context.
-        assert(!get_target().has_feature(Target::Profile));
+        target.set(get_target().without_feature(Target::Profile));
+
+        return f;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<UserContext> register_my_gen{"user_context"};
 
-HALIDE_REGISTER_GENERATOR(UserContext, user_context)
+}  // namespace

@@ -1,23 +1,22 @@
-#include "Associativity.h"
-#include "AutoScheduleUtils.h"
-#include "Bounds.h"
-#include "CPlusPlusMangle.h"
-#include "CSE.h"
-#include "CodeGen_C.h"
-#include "Deinterleave.h"
-#include "Func.h"
-#include "Generator.h"
 #include "IR.h"
-#include "IREquality.h"
-#include "IRMatch.h"
 #include "IRPrinter.h"
-#include "Interval.h"
+#include "CodeGen_X86.h"
+#include "CodeGen_C.h"
+#include "CPlusPlusMangle.h"
+#include "Func.h"
+#include "Simplify.h"
+#include "Bounds.h"
+#include "IRMatch.h"
+#include "Deinterleave.h"
 #include "ModulusRemainder.h"
+#include "CSE.h"
+#include "IREquality.h"
+#include "Solve.h"
 #include "Monotonic.h"
 #include "Reduction.h"
-#include "Solve.h"
-#include "SpirvIR.h"
-#include "UniquifyVariableNames.h"
+#include "Interval.h"
+#include "Associativity.h"
+#include "Generator.h"
 
 using namespace Halide;
 using namespace Halide::Internal;
@@ -31,17 +30,15 @@ int main(int argc, const char **argv) {
     deinterleave_vector_test();
     modulus_remainder_test();
     cse_test();
+    simplify_test();
     solve_test();
     target_test();
     cplusplus_mangle_test();
     is_monotonic_test();
     split_predicate_test();
+    interval_test();
     associativity_test();
     generator_test();
-    propagate_estimate_test();
-    uniquify_variable_names_test();
-    spirv_ir_test();
 
-    printf("Success!\n");
     return 0;
 }

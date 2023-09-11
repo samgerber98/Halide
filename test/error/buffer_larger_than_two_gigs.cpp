@@ -1,9 +1,5 @@
 #include "Halide.h"
-#include <cstdio>
-
-#ifdef NDEBUG
-#error "buffer_larger_than_two_gigs requires assertions"
-#endif
+#include <stdio.h>
 
 using namespace Halide;
 int main(int argc, char **argv) {
@@ -12,7 +8,5 @@ int main(int argc, char **argv) {
     } else {
         Buffer<uint8_t> result(1 << 12, 1 << 12, 1 << 8);
     }
-
     printf("Success!\n");
-    return 0;
 }

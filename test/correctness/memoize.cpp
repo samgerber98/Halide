@@ -1,17 +1,23 @@
-#include "Halide.h"
-#include "HalideRuntime.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "Halide.h"
+#include "HalideRuntime.h"
 
 using namespace Halide;
+
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
 
 // External functions to track whether the cache is working.
 
 int call_count = 0;
 
-extern "C" HALIDE_EXPORT_SYMBOL int count_calls(halide_buffer_t *out) {
-    if (!out->is_bounds_query()) {
+extern "C" DLLEXPORT int count_calls(buffer_t *out) {
+    if (out->host) {
         call_count++;
         Halide::Runtime::Buffer<uint8_t>(*out).fill(42);
     }
@@ -20,8 +26,8 @@ extern "C" HALIDE_EXPORT_SYMBOL int count_calls(halide_buffer_t *out) {
 
 int call_count_with_arg = 0;
 
-extern "C" HALIDE_EXPORT_SYMBOL int count_calls_with_arg(uint8_t val, halide_buffer_t *out) {
-    if (!out->is_bounds_query()) {
+extern "C" DLLEXPORT int count_calls_with_arg(uint8_t val, buffer_t *out) {
+    if (out->host) {
         call_count_with_arg++;
         Halide::Runtime::Buffer<uint8_t>(*out).fill(val);
     }
@@ -30,9 +36,9 @@ extern "C" HALIDE_EXPORT_SYMBOL int count_calls_with_arg(uint8_t val, halide_buf
 
 int call_count_with_arg_parallel[8];
 
-extern "C" HALIDE_EXPORT_SYMBOL int count_calls_with_arg_parallel(uint8_t val, halide_buffer_t *out) {
-    if (!out->is_bounds_query()) {
-        call_count_with_arg_parallel[out->dim[2].min]++;
+extern "C" DLLEXPORT int count_calls_with_arg_parallel(uint8_t val, buffer_t *out) {
+    if (out->host) {
+        call_count_with_arg_parallel[out->min[2]]++;
         Halide::Runtime::Buffer<uint8_t>(*out).fill(val);
     }
     return 0;
@@ -40,43 +46,37 @@ extern "C" HALIDE_EXPORT_SYMBOL int count_calls_with_arg_parallel(uint8_t val, h
 
 int call_count_staged[4];
 
-extern "C" HALIDE_EXPORT_SYMBOL int count_calls_staged(int32_t stage, uint8_t val, halide_buffer_t *in, halide_buffer_t *out) {
-    if (in->is_bounds_query()) {
-        for (int i = 0; i < out->dimensions; i++) {
-            in->dim[i] = out->dim[i];
+extern "C" DLLEXPORT int count_calls_staged(int32_t stage, uint8_t val, buffer_t *in, buffer_t *out) {
+    if (in->host == nullptr) {
+        for (int i = 0; i < 4; i++) {
+            in->min[i] = out->min[i];
+            in->extent[i] = out->extent[i];
+            in->stride[i] = out->stride[i];
         }
-    } else if (!out->is_bounds_query()) {
-        assert(stage < static_cast<int32_t>(sizeof(call_count_staged) / sizeof(call_count_staged[0])));
+        in->elem_size = out->elem_size;
+    } else if (out->host) {
+        assert(stage < static_cast<int32_t>(sizeof(call_count_staged)/sizeof(call_count_staged[0])));
         call_count_staged[stage]++;
         Halide::Runtime::Buffer<uint8_t> out_buf(*out), in_buf(*in);
-        out_buf.for_each_value([&](uint8_t &out, uint8_t &in) { out = in + val; }, in_buf);
+        out_buf.for_each_value([&](uint8_t &out, uint8_t &in) {out = in + val;}, in_buf);
     }
     return 0;
 }
 
-extern "C" HALIDE_EXPORT_SYMBOL int computed_eviction_key(int a) {
-    return 2020 + a;
+void simple_free(void *user_context, void *ptr) {
+    free(ptr);
 }
-HalideExtern_1(int, computed_eviction_key, int);
 
-void *(*default_malloc)(JITUserContext *, size_t);
-void (*default_free)(JITUserContext *, void *);
-
-// A flaky allocator that wraps the built-in runtime one.
-void *flaky_malloc(JITUserContext *user_context, size_t x) {
+void *flakey_malloc(void * /* user_context */, size_t x) {
     if ((rand() % 4) == 0) {
         return nullptr;
     } else {
-        return default_malloc(user_context, x);
+        return malloc(x);
     }
 }
 
-void simple_free(JITUserContext *user_context, void *ptr) {
-    return default_free(user_context, ptr);
-}
-
 bool error_occured = false;
-void record_error(JITUserContext *user_context, const char *msg) {
+void record_error(void *user_context, const char *msg) {
     error_occured = true;
 }
 
@@ -89,6 +89,7 @@ int main(int argc, char **argv) {
 
         Func f, f_memoized;
         f_memoized() = count_calls(0, 0);
+        f_memoized.compute_root().memoize();
         f() = f_memoized();
         f_memoized.compute_root().memoize();
 
@@ -115,8 +116,8 @@ int main(int argc, char **argv) {
         g(x, y) = f();
 
         coord.set(0);
-        Buffer<uint8_t> out1 = g.realize({256, 256});
-        Buffer<uint8_t> out2 = g.realize({256, 256});
+        Buffer<uint8_t> out1 = g.realize(256, 256);
+        Buffer<uint8_t> out2 = g.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -127,8 +128,8 @@ int main(int argc, char **argv) {
         assert(call_count == 1);
 
         coord.set(1);
-        Buffer<uint8_t> out3 = g.realize({256, 256});
-        Buffer<uint8_t> out4 = g.realize({256, 256});
+        Buffer<uint8_t> out3 = g.realize(256, 256);
+        Buffer<uint8_t> out4 = g.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -149,8 +150,8 @@ int main(int argc, char **argv) {
         f(x, y) = count_calls(x, y) + count_calls(x, y);
         count_calls.compute_root().memoize();
 
-        Buffer<uint8_t> out1 = f.realize({256, 256});
-        Buffer<uint8_t> out2 = f.realize({256, 256});
+        Buffer<uint8_t> out1 = f.realize(256, 256);
+        Buffer<uint8_t> out2 = f.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -176,8 +177,8 @@ int main(int argc, char **argv) {
         count_calls_23.compute_root().memoize();
         count_calls_42.compute_root().memoize();
 
-        Buffer<uint8_t> out1 = f.realize({256, 256});
-        Buffer<uint8_t> out2 = f.realize({256, 256});
+        Buffer<uint8_t> out1 = f.realize(256, 256);
+        Buffer<uint8_t> out2 = f.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -208,20 +209,21 @@ int main(int argc, char **argv) {
         val1.set(23);
         val2.set(42);
 
-        Buffer<uint8_t> out1 = f.realize({256, 256});
-        Buffer<uint8_t> out2 = f.realize({256, 256});
+        Buffer<uint8_t> out1 = f.realize(256, 256);
+        Buffer<uint8_t> out2 = f.realize(256, 256);
 
         val1.set(42);
-        Buffer<uint8_t> out3 = f.realize({256, 256});
+        Buffer<uint8_t> out3 = f.realize(256, 256);
 
         val1.set(23);
-        Buffer<uint8_t> out4 = f.realize({256, 256});
+        Buffer<uint8_t> out4 = f.realize(256, 256);
 
         val1.set(42);
-        Buffer<uint8_t> out5 = f.realize({256, 256});
+        Buffer<uint8_t> out5 = f.realize(256, 256);
 
         val2.set(57);
-        Buffer<uint8_t> out6 = f.realize({256, 256});
+        Buffer<uint8_t> out6 = f.realize(256, 256);
+
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -249,9 +251,9 @@ int main(int argc, char **argv) {
         count_calls.compute_root().memoize();
 
         val.set(23.0f);
-        Buffer<uint8_t> out1 = f.realize({256, 256});
+        Buffer<uint8_t> out1 = f.realize(256, 256);
         val.set(23.4f);
-        Buffer<uint8_t> out2 = f.realize({256, 256});
+        Buffer<uint8_t> out2 = f.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -275,9 +277,9 @@ int main(int argc, char **argv) {
         count_calls.compute_root().memoize();
 
         val.set(23.0f);
-        Buffer<uint8_t> out1 = f.realize({256, 256});
+        Buffer<uint8_t> out1 = f.realize(256, 256);
         val.set(23.4f);
-        Buffer<uint8_t> out2 = f.realize({256, 256});
+        Buffer<uint8_t> out2 = f.realize(256, 256);
 
         for (int32_t i = 0; i < 256; i++) {
             for (int32_t j = 0; j < 256; j++) {
@@ -308,13 +310,13 @@ int main(int argc, char **argv) {
 
         val.set(23.0f);
         index.set(2);
-        Buffer<uint8_t> out1 = h.realize({1});
+        Buffer<uint8_t> out1 = h.realize(1);
 
         assert(out1(0) == (uint8_t)(2 * 23 + 4 + 2));
         assert(call_count_with_arg == 3);
 
         index.set(4);
-        out1 = h.realize({1});
+        out1 = h.realize(1);
 
         assert(out1(0) == (uint8_t)(2 * 23 + 4 + 4));
         assert(call_count_with_arg == 4);
@@ -338,9 +340,10 @@ int main(int argc, char **argv) {
         g(x, y) = Tuple(f(x, y)[0] + f(x - 1, y)[0] + f(x + 1, y)[0], f(x, y)[1]);
 
         val.set(23.0f);
-        Realization out = g.realize({128, 128});
+        Realization out = g.realize(128, 128);
         Buffer<uint8_t> out0 = out[0];
         Buffer<int32_t> out1 = out[1];
+
 
         for (int32_t i = 0; i < 100; i++) {
             for (int32_t j = 0; j < 100; j++) {
@@ -348,9 +351,10 @@ int main(int argc, char **argv) {
                 assert(out1(i, j) == i);
             }
         }
-        out = g.realize({128, 128});
+        out = g.realize(128, 128);
         out0 = out[0];
         out1 = out[1];
+
 
         for (int32_t i = 0; i < 100; i++) {
             for (int32_t j = 0; j < 100; j++) {
@@ -381,7 +385,7 @@ int main(int argc, char **argv) {
         for (int v = 0; v < 1000; v++) {
             int r = rand() % 256;
             val.set((float)r);
-            Buffer<uint8_t> out1 = g.realize({128, 128});
+            Buffer<uint8_t> out1 = g.realize(128, 128);
 
             for (int32_t i = 0; i < 100; i++) {
                 for (int32_t j = 0; j < 100; j++) {
@@ -390,7 +394,7 @@ int main(int argc, char **argv) {
             }
         }
         // TODO work out an assertion on call count here.
-        printf("Call count is %d.\n", call_count_with_arg);
+        fprintf(stderr, "Call count is %d.\n", call_count_with_arg);
 
         // Return cache size to default.
         Internal::JITSharedRuntime::memoization_cache_set_size(0);
@@ -416,7 +420,7 @@ int main(int argc, char **argv) {
         for (int v = 0; v < 1000; v++) {
             int r = rand() % 256;
             val.set((float)r);
-            Buffer<uint8_t> out1 = g.realize({128, 128});
+            Buffer<uint8_t> out1 = g.realize(128, 128);
 
             for (int32_t i = 0; i < 100; i++) {
                 for (int32_t j = 0; j < 100; j++) {
@@ -426,20 +430,20 @@ int main(int argc, char **argv) {
         }
 
         // TODO work out an assertion on call count here.
-        printf("Call count before oversize realize is %d.\n", call_count_with_arg);
+        fprintf(stderr, "Call count before oversize realize is %d.\n", call_count_with_arg);
         call_count_with_arg = 0;
 
-        Buffer<uint8_t> big = g.realize({1024, 1024});
-        Buffer<uint8_t> big2 = g.realize({1024, 1024});
+        Buffer<uint8_t> big = g.realize(1024, 1024);
+        Buffer<uint8_t> big2 = g.realize(1024, 1024);
 
         // TODO work out an assertion on call count here.
-        printf("Call count after oversize realize is %d.\n", call_count_with_arg);
+        fprintf(stderr, "Call count after oversize realize is %d.\n", call_count_with_arg);
 
         call_count_with_arg = 0;
         for (int v = 0; v < 1000; v++) {
             int r = rand() % 256;
             val.set((float)r);
-            Buffer<uint8_t> out1 = g.realize({128, 128});
+            Buffer<uint8_t> out1 = g.realize(128, 128);
 
             for (int32_t i = 0; i < 100; i++) {
                 for (int32_t j = 0; j < 100; j++) {
@@ -448,7 +452,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        printf("Call count is %d.\n", call_count_with_arg);
+        fprintf(stderr, "Call count is %d.\n", call_count_with_arg);
 
         // Return cache size to default.
         Internal::JITSharedRuntime::memoization_cache_set_size(0);
@@ -475,7 +479,7 @@ int main(int argc, char **argv) {
 
         val.set(23.0f);
         Internal::JITSharedRuntime::memoization_cache_set_size(1000000);
-        Buffer<uint8_t> out = g.realize({128, 128});
+        Buffer<uint8_t> out = g.realize(128, 128);
 
         for (int32_t i = 0; i < 128; i++) {
             for (int32_t j = 0; j < 128; j++) {
@@ -485,49 +489,11 @@ int main(int argc, char **argv) {
 
         // TODO work out an assertion on call counts here.
         for (int i = 0; i < 8; i++) {
-            printf("Call count for thread %d is %d.\n", i, call_count_with_arg_parallel[i]);
+          fprintf(stderr, "Call count for thread %d is %d.\n", i, call_count_with_arg_parallel[i]);
         }
 
         // Return cache size to default.
         Internal::JITSharedRuntime::memoization_cache_set_size(0);
-    }
-
-    {
-        // Test multiple argument memoize_tag. This can be unsafe but
-        // models cases where one uses a hash of image data as part of
-        // a tag to memoize an expensive computation.
-        ImageParam input(UInt(8), 1);
-        Param<int> key;
-        Func f, g;
-        RDom extent(input);
-
-        g() = memoize_tag(sum(input(extent)), key);
-        f() = g() + 42;
-        g.compute_root().memoize();
-
-        Buffer<uint8_t> in(10);
-        input.set(in);
-
-        in.fill(42);
-
-        key.set(0);
-        Buffer<uint8_t> result = f.realize();
-        assert(result() == (462 % 256));
-
-        // Change image data without channging tag
-        in(0) = 41;
-        result = f.realize();
-
-        // Result is likely stale. This is not strictly guaranteed due to e.g.
-        // cache size. Hence allow correct value to make test express the
-        // contract.
-        assert((result() == (462 % 256)) ||
-               (result() == (461 % 256)));
-
-        // Change tag, thus ensuring correct result.
-        key.set(1);
-        result = f.realize();
-        assert(result() == (461 % 256));
     }
 
     {
@@ -553,50 +519,39 @@ int main(int argc, char **argv) {
 
         f.compute_root();
         for (int i = 0; i < 3; i++) {
-            stage[i].compute_root();
+          stage[i].compute_root();
         }
         stage[3].compute_root().memoize();
         Func output;
         output(_) = stage[3](_);
         val.set(23.0f);
-        Buffer<uint8_t> result = output.realize({128, 128});
+        Buffer<uint8_t> result = output.realize(128, 128);
 
         for (int32_t i = 0; i < 128; i++) {
             for (int32_t j = 0; j < 128; j++) {
-                assert(result(i, j) == (uint8_t)((i << 8) + j + 4 * 23));
+              assert(result(i, j) == (uint8_t)((i << 8) + j + 4 * 23));
             }
         }
 
         for (int i = 0; i < 4; i++) {
-            printf("Call count for stage %d is %d.\n", i, call_count_staged[i]);
+          fprintf(stderr, "Call count for stage %d is %d.\n", i, call_count_staged[i]);
         }
 
-        result = output.realize({128, 128});
+        result = output.realize(128, 128);
         for (int32_t i = 0; i < 128; i++) {
             for (int32_t j = 0; j < 128; j++) {
-                assert(result(i, j) == (uint8_t)((i << 8) + j + 4 * 23));
+              assert(result(i, j) == (uint8_t)((i << 8) + j + 4 * 23));
             }
         }
 
         for (int i = 0; i < 4; i++) {
-            printf("Call count for stage %d is %d.\n", i, call_count_staged[i]);
+            fprintf(stderr, "Call count for stage %d is %d.\n", i, call_count_staged[i]);
         }
+
     }
 
-    if (get_jit_target_from_environment().arch == Target::WebAssembly) {
-        printf("[SKIP] WebAssembly JIT does not support custom allocators.\n");
-        return 0;
-    } else {
+    {
         // Test out of memory handling.
-
-        // Get the runtime's malloc and free. We need to use the ones
-        // in the runtime to ensure the matching free is called when
-        // we release all the runtimes at the end.
-        JITUserContext ctx;
-        Internal::JITSharedRuntime::populate_jit_handlers(&ctx, JITHandlers{});
-        default_malloc = ctx.handlers.custom_malloc;
-        default_free = ctx.handlers.custom_free;
-
         Param<float> val;
 
         Func count_calls;
@@ -612,9 +567,8 @@ int main(int argc, char **argv) {
         g(x, y) = Tuple(f(x, y)[0] + f(x - 1, y)[0] + f(x + 1, y)[0], f(x, y)[1]);
 
         Pipeline pipe(g);
-        pipe.jit_handlers().custom_error = record_error;
-        pipe.jit_handlers().custom_malloc = flaky_malloc;
-        pipe.jit_handlers().custom_free = simple_free;
+        pipe.set_error_handler(record_error);
+        pipe.set_custom_allocator(flakey_malloc, simple_free);
 
         int total_errors = 0;
         int completed = 0;
@@ -623,7 +577,7 @@ int main(int argc, char **argv) {
             error_occured = false;
 
             val.set(23.0f + trial);
-            Realization out = pipe.realize({16, 16});
+            Realization out = pipe.realize(16, 16);
             if (error_occured) {
                 total_errors++;
             } else {
@@ -632,13 +586,13 @@ int main(int argc, char **argv) {
 
                 for (int32_t i = 0; i < 16; i++) {
                     for (int32_t j = 0; j < 16; j++) {
-                        assert(out0(i, j) == (uint8_t)(3 * (23 + trial) + i + (i - 1) + (i + 1)));
+                      assert(out0(i, j) == (uint8_t)(3 * (23 + trial) + i + (i - 1) + (i + 1)));
                         assert(out1(i, j) == i);
                     }
                 }
 
                 error_occured = false;
-                out = pipe.realize({16, 16});
+                out = pipe.realize(16, 16);
                 if (error_occured) {
                     total_errors++;
                 } else {
@@ -647,7 +601,7 @@ int main(int argc, char **argv) {
 
                     for (int32_t i = 0; i < 16; i++) {
                         for (int32_t j = 0; j < 16; j++) {
-                            assert(out0(i, j) == (uint8_t)(3 * (23 + trial) + i + (i - 1) + (i + 1)));
+                          assert(out0(i, j) == (uint8_t)(3 * (23 + trial) + i + (i - 1) + (i + 1)));
                             assert(out1(i, j) == i);
                         }
                     }
@@ -657,98 +611,11 @@ int main(int argc, char **argv) {
             }
         }
 
-        printf("In 100 attempts with flaky malloc, %d errors and %d full completions occured.\n",
-               total_errors, completed);
+        fprintf(stderr, "In 100 attempts with flakey malloc, %d errors and %d full completions occured.\n", total_errors, completed);
+
+
     }
 
-    {
-        call_count = 0;
-        Func count_calls;
-        count_calls.define_extern("count_calls", {}, UInt(8), 2);
-
-        ImageParam input(UInt(8), 1);
-        Func f, f_memoized;
-        f_memoized() = count_calls(0, 0) + cast<uint8_t>(input.dim(0).extent());
-        f_memoized.compute_root().memoize();
-        f() = f_memoized();
-
-        Buffer<uint8_t> in_one(1);
-        input.set(in_one);
-
-        Buffer<uint8_t> result1 = f.realize();
-        Buffer<uint8_t> result2 = f.realize();
-
-        assert(result1(0) == 43);
-        assert(result2(0) == 43);
-
-        assert(call_count == 1);
-
-        Buffer<uint8_t> in_ten(10);
-        input.set(in_ten);
-
-        result1 = f.realize();
-        result2 = f.realize();
-
-        assert(result1(0) == 52);
-        assert(result2(0) == 52);
-
-        assert(call_count == 2);
-    }
-
-    // Test cache eviction.
-    {
-        call_count = 0;
-        Func count_calls;
-        count_calls.define_extern("count_calls", {}, UInt(8), 2);
-
-        Param<void *> p;
-        Func f, memoized_one, memoized_two, memoized_three;
-        memoized_one() = count_calls(0, 0);
-        memoized_two() = count_calls(1, 1);
-        memoized_three() = count_calls(3, 3);
-        memoized_one.compute_root().memoize(EvictionKey(1));
-        memoized_two.compute_root().memoize(EvictionKey(p));
-        // The called extern here would usually take user_context and extact a value
-        // from within, but JIT mostly subsumes user_context, so this is just an example.
-        memoized_three.compute_root().memoize(EvictionKey(computed_eviction_key(5)));
-        f() = memoized_one() + memoized_two() + memoized_three();
-
-        p.set((void *)&call_count);
-        Buffer<uint8_t> result1 = f.realize();
-        Buffer<uint8_t> result2 = f.realize();
-
-        assert(result1(0) == 126);
-        assert(result2(0) == 126);
-
-        assert(call_count == 3);
-
-        Internal::JITSharedRuntime::memoization_cache_evict(1);
-        result1 = f.realize();
-        assert(result1(0) == 126);
-
-        assert(call_count == 4);
-
-        Internal::JITSharedRuntime::memoization_cache_evict(1);
-        result1 = f.realize();
-        assert(result1(0) == 126);
-
-        assert(call_count == 5);
-
-        Internal::JITSharedRuntime::memoization_cache_evict(1);
-        Internal::JITSharedRuntime::memoization_cache_evict((uint64_t)(uintptr_t)&call_count);
-        result1 = f.realize();
-        assert(result1(0) == 126);
-
-        assert(call_count == 7);
-
-        Internal::JITSharedRuntime::memoization_cache_evict(2025);
-        result1 = f.realize();
-        assert(result1(0) == 126);
-
-        assert(call_count == 8);
-    }
-    Internal::JITSharedRuntime::release_all();
-
-    printf("Success!\n");
+    fprintf(stderr, "Success!\n");
     return 0;
 }

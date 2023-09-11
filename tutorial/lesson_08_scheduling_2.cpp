@@ -1,12 +1,12 @@
 // Halide tutorial lesson 8: Scheduling multi-stage pipelines
 
 // On linux, you can compile and run it like so:
-// g++ lesson_08*.cpp -g -std=c++17 -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -lpthread -ldl -o lesson_08
-// LD_LIBRARY_PATH=<path/to/libHalide.so> ./lesson_08
+// g++ lesson_08*.cpp -g -std=c++11 -I ../include -L ../bin -lHalide -lpthread -ldl -o lesson_08
+// LD_LIBRARY_PATH=../bin ./lesson_08
 
 // On os x:
-// g++ lesson_08*.cpp -g -std=c++17 -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -o lesson_08
-// DYLD_LIBRARY_PATH=<path/to/libHalide.dylib> ./lesson_08
+// g++ lesson_08*.cpp -g -std=c++11 -I ../include -L ../bin -lHalide -o lesson_08
+// DYLD_LIBRARY_PATH=../bin ./lesson_08
 
 // If you have the entire Halide source tree, you can also build it by
 // running:
@@ -36,9 +36,9 @@ int main(int argc, char **argv) {
         // Now we'll add a second stage which averages together multiple
         // points in the first stage.
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
 
         // We'll turn on tracing for both functions.
         consumer.trace_stores();
@@ -46,7 +46,7 @@ int main(int argc, char **argv) {
 
         // And evaluate it over a 4x4 box.
         printf("\nEvaluating producer-consumer pipeline with default schedule\n");
-        consumer.realize({4, 4});
+        consumer.realize(4, 4);
 
         // There were no messages about computing values of the
         // producer. This is because the default schedule fully
@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
         // consumer(x, y) = (sin(x * y) +
         //                   sin(x * (y + 1)) +
         //                   sin((x + 1) * y) +
-        //                   sin((x + 1) * (y + 1))/4);
+        //                   sin((x + 1) * (y + 1)));
 
         // All calls to 'producer' have been replaced with the body of
         // 'producer', with the arguments substituted in for the
@@ -66,10 +66,10 @@ int main(int argc, char **argv) {
         float result[4][4];
         for (int y = 0; y < 4; y++) {
             for (int x = 0; x < 4; x++) {
-                result[y][x] = (sin(x * y) +
-                                sin(x * (y + 1)) +
-                                sin((x + 1) * y) +
-                                sin((x + 1) * (y + 1))) / 4;
+                result[y][x] = (sin(x*y) +
+                                sin(x*(y+1)) +
+                                sin((x+1)*y) +
+                                sin((x+1)*(y+1)))/4;
             }
         }
         printf("\n");
@@ -89,9 +89,9 @@ int main(int argc, char **argv) {
         Func producer("producer_root"), consumer("consumer_root");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
 
         // Tell Halide to evaluate all of producer before any of consumer.
         producer.compute_root();
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
 
         // Compile and run.
         printf("\nEvaluating producer.compute_root()\n");
-        consumer.realize({4, 4});
+        consumer.realize(4, 4);
 
         // Reading the output we can see that:
         // A) There were stores to producer.
@@ -131,9 +131,9 @@ int main(int argc, char **argv) {
         for (int y = 0; y < 4; y++) {
             for (int x = 0; x < 4; x++) {
                 result[y][x] = (producer_storage[y][x] +
-                                producer_storage[y + 1][x] +
-                                producer_storage[y][x + 1] +
-                                producer_storage[y + 1][x + 1]) / 4;
+                                producer_storage[y+1][x] +
+                                producer_storage[y][x+1] +
+                                producer_storage[y+1][x+1])/4;
             }
         }
 
@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
     // producer.compute_root():
     // - Temporary memory allocated: 25 floats
     // - Loads: 64
-    // - Stores: 41
+    // - Stores: 39
     // - Calls to sin: 25
 
     // There's a trade-off here. Full inlining used minimal temporary
@@ -191,9 +191,9 @@ int main(int argc, char **argv) {
         Func producer("producer_y"), consumer("consumer_y");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
 
         // Tell Halide to evaluate producer as needed per y coordinate
         // of the consumer:
@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
 
         // Compile and run.
         printf("\nEvaluating producer.compute_at(consumer, y)\n");
-        consumer.realize({4, 4});
+        consumer.realize(4, 4);
 
         // See figures/lesson_08_compute_y.gif for a visualization.
 
@@ -228,7 +228,7 @@ int main(int argc, char **argv) {
             float producer_storage[2][5];
             for (int py = y; py < y + 2; py++) {
                 for (int px = 0; px < 5; px++) {
-                    producer_storage[py - y][px] = sin(px * py);
+                    producer_storage[py-y][px] = sin(px * py);
                 }
             }
 
@@ -236,8 +236,8 @@ int main(int argc, char **argv) {
             for (int x = 0; x < 4; x++) {
                 result[y][x] = (producer_storage[0][x] +
                                 producer_storage[1][x] +
-                                producer_storage[0][x + 1] +
-                                producer_storage[1][x + 1]) / 4;
+                                producer_storage[0][x+1] +
+                                producer_storage[1][x+1])/4;
             }
         }
 
@@ -249,7 +249,7 @@ int main(int argc, char **argv) {
 
         // The performance characteristics of this strategy are in
         // between inlining and compute root. We still allocate some
-        // temporary memory, but less than compute_root, and with
+        // temporary memory, but less that compute_root, and with
         // better locality (we load from it soon after writing to it,
         // so for larger images, values should still be in cache). We
         // still do some redundant work, but less than full inlining:
@@ -270,9 +270,10 @@ int main(int argc, char **argv) {
         Func producer("producer_root_y"), consumer("consumer_root_y");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
+
 
         // Tell Halide to make a buffer to store all of producer at
         // the outermost level:
@@ -285,7 +286,7 @@ int main(int argc, char **argv) {
         consumer.trace_stores();
 
         printf("\nEvaluating producer.store_root().compute_at(consumer, y)\n");
-        consumer.realize({4, 4});
+        consumer.realize(4, 4);
 
         // See figures/lesson_08_store_root_compute_y.gif for a
         // visualization.
@@ -326,9 +327,9 @@ int main(int argc, char **argv) {
             // Compute a scanline of the consumer.
             for (int x = 0; x < 4; x++) {
                 result[y][x] = (producer_storage[y][x] +
-                                producer_storage[y + 1][x] +
-                                producer_storage[y][x + 1] +
-                                producer_storage[y + 1][x + 1]) / 4;
+                                producer_storage[y+1][x] +
+                                producer_storage[y][x+1] +
+                                producer_storage[y+1][x+1])/4;
             }
         }
 
@@ -337,7 +338,7 @@ int main(int argc, char **argv) {
         printf("\n");
 
         // The performance characteristics of this strategy are pretty
-        // good! The numbers are similar to compute_root, except locality
+        // good! The numbers are similar compute_root, except locality
         // is better. We're doing the minimum number of sin calls,
         // and we load values soon after they are stored, so we're
         // probably making good use of the cache:
@@ -345,7 +346,7 @@ int main(int argc, char **argv) {
         // producer.store_root().compute_at(consumer, y):
         // - Temporary memory allocated: 10 floats
         // - Loads: 64
-        // - Stores: 41
+        // - Stores: 39
         // - Calls to sin: 25
 
         // Note that my claimed amount of memory allocated doesn't
@@ -370,23 +371,24 @@ int main(int argc, char **argv) {
                 for (int x = 0; x < 4; x++) {
                     // Loads from producer_storage have their y coordinate bit-masked.
                     result[y][x] = (producer_storage[y & 1][x] +
-                                    producer_storage[(y + 1) & 1][x] +
-                                    producer_storage[y & 1][x + 1] +
-                                    producer_storage[(y + 1) & 1][x + 1]) / 4;
+                                    producer_storage[(y+1) & 1][x] +
+                                    producer_storage[y & 1][x+1] +
+                                    producer_storage[(y+1) & 1][x+1])/4;
                 }
             }
         }
     }
 
-    // We can do even better, by leaving the storage in the outermost
-    // loop, but moving the computation into the innermost loop:
+    // We can do even better, by leaving the storage outermost, but
+    // moving the computation into the innermost loop:
     {
         Func producer("producer_root_x"), consumer("consumer_root_x");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
+
 
         // Store outermost, compute innermost.
         producer.store_root().compute_at(consumer, x);
@@ -395,7 +397,7 @@ int main(int argc, char **argv) {
         consumer.trace_stores();
 
         printf("\nEvaluating producer.store_root().compute_at(consumer, x)\n");
-        consumer.realize({4, 4});
+        consumer.realize(4, 4);
 
         // See figures/lesson_08_store_root_compute_x.gif for a
         // visualization.
@@ -417,21 +419,18 @@ int main(int argc, char **argv) {
                 // Compute enough of the producer to satisfy this
                 // pixel of the consumer, but skip values that we've
                 // already computed:
-                if (y == 0 && x == 0) {
-                    producer_storage[y & 1][x] = sin(x * y);
-                }
-                if (y == 0) {
-                    producer_storage[y & 1][x + 1] = sin((x + 1) * y);
-                }
-                if (x == 0) {
-                    producer_storage[(y + 1) & 1][x] = sin(x * (y + 1));
-                }
-                producer_storage[(y + 1) & 1][x + 1] = sin((x + 1) * (y + 1));
+                if (y == 0 && x == 0)
+                    producer_storage[y & 1][x] = sin(x*y);
+                if (y == 0)
+                    producer_storage[y & 1][x+1] = sin((x+1)*y);
+                if (x == 0)
+                    producer_storage[(y+1) & 1][x] = sin(x*(y+1));
+                producer_storage[(y+1) & 1][x+1] = sin((x+1)*(y+1));
 
                 result[y][x] = (producer_storage[y & 1][x] +
-                                producer_storage[(y + 1) & 1][x] +
-                                producer_storage[y & 1][x + 1] +
-                                producer_storage[(y + 1) & 1][x + 1]) / 4;
+                                producer_storage[(y+1) & 1][x] +
+                                producer_storage[y & 1][x+1] +
+                                producer_storage[(y+1) & 1][x+1])/4;
             }
         }
 
@@ -446,8 +445,8 @@ int main(int argc, char **argv) {
         // producer.store_root().compute_at(consumer, x):
         // - Temporary memory allocated: 10 floats
         // - Loads: 48
-        // - Stores: 41
-        // - Calls to sin: 25
+        // - Stores: 56
+        // - Calls to sin: 40
     }
 
     // So what's the catch? Why not always do
@@ -455,7 +454,7 @@ int main(int argc, char **argv) {
     // code?
     //
     // The answer is parallelism. In both of the previous two
-    // strategies we've assumed that values computed in previous
+    // strategies we've assumed that values computed on previous
     // iterations are lying around for us to reuse. This assumes that
     // previous values of x or y happened earlier in time and have
     // finished. This is not true if you parallelize or vectorize
@@ -474,9 +473,9 @@ int main(int argc, char **argv) {
         Func producer("producer_tile"), consumer("consumer_tile");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
 
         // We'll compute 8x8 of the consumer, in 4x4 tiles.
         Var x_outer, y_outer, x_inner, y_inner;
@@ -498,7 +497,7 @@ int main(int argc, char **argv) {
         printf("\nEvaluating:\n"
                "consumer.tile(x, y, x_outer, y_outer, x_inner, y_inner, 4, 4);\n"
                "producer.compute_at(consumer, x_outer);\n");
-        consumer.realize({8, 8});
+        consumer.realize(8, 8);
 
         // See figures/lesson_08_tile.gif for a visualization.
 
@@ -511,8 +510,8 @@ int main(int argc, char **argv) {
         for (int y_outer = 0; y_outer < 2; y_outer++) {
             for (int x_outer = 0; x_outer < 2; x_outer++) {
                 // Compute the x and y coords of the start of this tile.
-                int x_base = x_outer * 4;
-                int y_base = y_outer * 4;
+                int x_base = x_outer*4;
+                int y_base = y_outer*4;
 
                 // Compute enough of producer to satisfy this tile. A
                 // 4x4 tile of the consumer requires a 5x5 tile of the
@@ -520,7 +519,7 @@ int main(int argc, char **argv) {
                 float producer_storage[5][5];
                 for (int py = y_base; py < y_base + 5; py++) {
                     for (int px = x_base; px < x_base + 5; px++) {
-                        producer_storage[py - y_base][px - x_base] = sin(px * py);
+                        producer_storage[py-y_base][px-x_base] = sin(px * py);
                     }
                 }
 
@@ -533,7 +532,7 @@ int main(int argc, char **argv) {
                             (producer_storage[y - y_base][x - x_base] +
                              producer_storage[y - y_base + 1][x - x_base] +
                              producer_storage[y - y_base][x - x_base + 1] +
-                             producer_storage[y - y_base + 1][x - x_base + 1]) / 4;
+                             producer_storage[y - y_base + 1][x - x_base + 1])/4;
                     }
                 }
             }
@@ -559,9 +558,9 @@ int main(int argc, char **argv) {
         Func producer("producer_mixed"), consumer("consumer_mixed");
         producer(x, y) = sin(x * y);
         consumer(x, y) = (producer(x, y) +
-                          producer(x, y + 1) +
-                          producer(x + 1, y) +
-                          producer(x + 1, y + 1)) / 4;
+                          producer(x, y+1) +
+                          producer(x+1, y) +
+                          producer(x+1, y+1))/4;
 
         // Split the y coordinate of the consumer into strips of 16 scanlines:
         Var yo, yi;
@@ -586,7 +585,7 @@ int main(int argc, char **argv) {
         // consumer.trace_stores();
         // producer.trace_stores();
 
-        Buffer<float> halide_result = consumer.realize({160, 160});
+        Buffer<float> halide_result = consumer.realize(160, 160);
 
         // See figures/lesson_08_mixed.mp4 for a visualization.
 
@@ -596,8 +595,12 @@ int main(int argc, char **argv) {
 
         // For every strip of 16 scanlines (this loop is parallel in
         // the Halide version)
-        for (int yo = 0; yo < 160 / 16; yo++) {
+        for (int yo = 0; yo < 160/16 + 1; yo++) {
+
+            // 16 doesn't divide 160, so push the last slice upwards
+            // to fit within [0, 159] (see lesson 05).
             int y_base = yo * 16;
+            if (y_base > 160-16) y_base = 160-16;
 
             // Allocate a two-scanline circular buffer for the producer
             float producer_storage[2][161];
@@ -606,13 +609,13 @@ int main(int argc, char **argv) {
             for (int yi = 0; yi < 16; yi++) {
                 int y = y_base + yi;
 
-                for (int py = y; py < y + 2; py++) {
+                for (int py = y; py < y+2; py++) {
                     // Skip scanlines already computed *within this task*
                     if (yi > 0 && py == y) continue;
 
                     // Compute this scanline of the producer in 4-wide vectors
-                    for (int x_vec = 0; x_vec < 160 / 4 + 1; x_vec++) {
-                        int x_base = x_vec * 4;
+                    for (int x_vec = 0; x_vec < 160/4 + 1; x_vec++) {
+                        int x_base = x_vec*4;
                         // 4 doesn't divide 161, so push the last vector left
                         // (see lesson 05).
                         if (x_base > 161 - 4) x_base = 161 - 4;
@@ -628,37 +631,34 @@ int main(int argc, char **argv) {
                 }
 
                 // Now compute consumer for this scanline:
-                for (int x_vec = 0; x_vec < 160 / 4; x_vec++) {
+                for (int x_vec = 0; x_vec < 160/4; x_vec++) {
                     int x_base = x_vec * 4;
                     // Again, Halide's equivalent here uses SSE.
                     int x[] = {x_base, x_base + 1, x_base + 2, x_base + 3};
                     float vec[] = {
                         (producer_storage[y & 1][x[0]] +
-                         producer_storage[(y + 1) & 1][x[0]] +
-                         producer_storage[y & 1][x[0] + 1] +
-                         producer_storage[(y + 1) & 1][x[0] + 1]) /
-                            4,
+                         producer_storage[(y+1) & 1][x[0]] +
+                         producer_storage[y & 1][x[0]+1] +
+                         producer_storage[(y+1) & 1][x[0]+1])/4,
                         (producer_storage[y & 1][x[1]] +
-                         producer_storage[(y + 1) & 1][x[1]] +
-                         producer_storage[y & 1][x[1] + 1] +
-                         producer_storage[(y + 1) & 1][x[1] + 1]) /
-                            4,
+                         producer_storage[(y+1) & 1][x[1]] +
+                         producer_storage[y & 1][x[1]+1] +
+                         producer_storage[(y+1) & 1][x[1]+1])/4,
                         (producer_storage[y & 1][x[2]] +
-                         producer_storage[(y + 1) & 1][x[2]] +
-                         producer_storage[y & 1][x[2] + 1] +
-                         producer_storage[(y + 1) & 1][x[2] + 1]) /
-                            4,
+                         producer_storage[(y+1) & 1][x[2]] +
+                         producer_storage[y & 1][x[2]+1] +
+                         producer_storage[(y+1) & 1][x[2]+1])/4,
                         (producer_storage[y & 1][x[3]] +
-                         producer_storage[(y + 1) & 1][x[3]] +
-                         producer_storage[y & 1][x[3] + 1] +
-                         producer_storage[(y + 1) & 1][x[3] + 1]) /
-                            4};
+                         producer_storage[(y+1) & 1][x[3]] +
+                         producer_storage[y & 1][x[3]+1] +
+                         producer_storage[(y+1) & 1][x[3]+1])/4};
 
                     c_result[y][x[0]] = vec[0];
                     c_result[y][x[1]] = vec[1];
                     c_result[y][x[2]] = vec[2];
                     c_result[y][x[3]] = vec[3];
                 }
+
             }
         }
         printf("Pseudo-code for the schedule:\n");
@@ -681,6 +681,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
     }
 
     // This stuff is hard. We ended up in a three-way trade-off

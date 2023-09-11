@@ -1,14 +1,14 @@
 #include "Halide.h"
-#include <memory>
 #include <stdio.h>
-
-using namespace Halide;
+#include <memory>
 
 int error_occurred = false;
-void halide_error(JITUserContext *ctx, const char *msg) {
+void halide_error(void *ctx, const char *msg) {
     printf("Expected: %s\n", msg);
     error_occurred = true;
 }
+
+using namespace Halide;
 
 int main(int argc, char **argv) {
     Var x, y, z;
@@ -23,7 +23,7 @@ int main(int argc, char **argv) {
                                   {0, 256, 0}};
     Buffer<uint8_t> output(c, 3, shape);
 
-    identity_uint8.jit_handlers().custom_error = halide_error;
+    identity_uint8.set_error_handler(&halide_error);
 
     Target t = get_jit_target_from_environment();
 

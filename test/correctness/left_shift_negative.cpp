@@ -6,7 +6,7 @@ int main(int argc, char **argv) {
     Func f, g;
     Var x;
     f(x) = cast<int16_t>(-x);
-    g(x) = cast<uint16_t>(x % 8);
+    g(x) = cast<int16_t>(x % 8);
 
     f.compute_root();
     g.compute_root();
@@ -26,17 +26,16 @@ int main(int argc, char **argv) {
     h1.vectorize(x, 16);
     h2.vectorize(x, 16);
 
-    Buffer<int16_t> im1 = h1.realize({1024});
-    Buffer<int16_t> im2 = h2.realize({1024});
+    Buffer<int16_t> im1 = h1.realize(1024);
+    Buffer<int16_t> im2 = h2.realize(1024);
 
     for (int i = 0; i < im1.width(); i++) {
         if (im1(i) != im2(i)) {
             printf("im1(%d) = %d, im2(%d) = %d\n",
                    i, im1(i), i, im2(i));
-            return 1;
+            return -1;
         }
     }
 
-    printf("Success!\n");
     return 0;
 }

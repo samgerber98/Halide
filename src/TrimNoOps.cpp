@@ -1,22 +1,24 @@
 #include <algorithm>
 
-#include "CSE.h"
-#include "CodeGen_GPU_Dev.h"
-#include "ExprUsesVar.h"
-#include "IREquality.h"
+#include "TrimNoOps.h"
 #include "IRMutator.h"
 #include "IROperator.h"
 #include "Simplify.h"
 #include "Solve.h"
+#include "IREquality.h"
+#include "ExprUsesVar.h"
 #include "Substitute.h"
-#include "TrimNoOps.h"
+#include "CodeGen_GPU_Dev.h"
 #include "Var.h"
+#include "CSE.h"
 
 namespace Halide {
 namespace Internal {
 
 using std::string;
 using std::vector;
+using std::pair;
+using std::map;
 
 namespace {
 
@@ -24,11 +26,13 @@ namespace {
 class StripIdentities : public IRMutator {
     using IRMutator::visit;
 
-    Expr visit(const Call *op) override {
-        if (Call::as_tag(op) || op->is_intrinsic(Call::return_second)) {
-            return mutate(op->args.back());
+    void visit(const Call *op) {
+        if (op->is_intrinsic(Call::return_second) ||
+            op->is_intrinsic(Call::likely) ||
+            op->is_intrinsic(Call::likely_if_innermost)) {
+            expr = mutate(op->args.back());
         } else {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         }
     }
 };
@@ -37,7 +41,7 @@ class StripIdentities : public IRMutator {
 class LoadsFromBuffer : public IRVisitor {
     using IRVisitor::visit;
 
-    void visit(const Load *op) override {
+    void visit(const Load *op) {
         if (op->name == buffer) {
             result = true;
         } else {
@@ -46,15 +50,12 @@ class LoadsFromBuffer : public IRVisitor {
     }
 
     string buffer;
-
 public:
     bool result = false;
-    LoadsFromBuffer(const string &b)
-        : buffer(b) {
-    }
+    LoadsFromBuffer(const string &b) : buffer(b) {}
 };
 
-bool loads_from_buffer(const Expr &e, const string &buf) {
+bool loads_from_buffer(Expr e, string buf) {
     LoadsFromBuffer l(buf);
     e.accept(&l);
     return l.result;
@@ -65,30 +66,22 @@ class IsNoOp : public IRVisitor {
     using IRVisitor::visit;
 
     Expr make_and(Expr a, Expr b) {
-        if (is_const_zero(a) || is_const_one(b)) {
-            return a;
-        }
-        if (is_const_zero(b) || is_const_one(a)) {
-            return b;
-        }
+        if (is_zero(a) || is_one(b)) return a;
+        if (is_zero(b) || is_one(a)) return b;
         return a && b;
     }
 
     Expr make_or(Expr a, Expr b) {
-        if (is_const_zero(a) || is_const_one(b)) {
-            return b;
-        }
-        if (is_const_zero(b) || is_const_one(a)) {
-            return a;
-        }
+        if (is_zero(a) || is_one(b)) return b;
+        if (is_zero(b) || is_one(a)) return a;
         return a || b;
     }
 
-    void visit(const Store *op) override {
-        if (op->value.type().is_handle() || is_const_zero(op->predicate)) {
+    void visit(const Store *op) {
+        if (op->value.type().is_handle() || is_zero(op->predicate)) {
             condition = const_false();
         } else {
-            if (is_const_zero(condition)) {
+            if (is_zero(condition)) {
                 return;
             }
             // If the value being stored is the same as the value loaded,
@@ -103,7 +96,7 @@ class IsNoOp : public IRVisitor {
             }
 
             Expr equivalent_load = Load::make(op->value.type(), op->name, op->index,
-                                              Buffer<>(), Parameter(), op->predicate, op->alignment);
+                                              Buffer<>(), Parameter(), op->predicate);
             Expr is_no_op = equivalent_load == op->value;
             is_no_op = StripIdentities().mutate(is_no_op);
             // We need to call CSE since sometimes we have "let" stmt on the RHS
@@ -117,8 +110,8 @@ class IsNoOp : public IRVisitor {
         }
     }
 
-    void visit(const For *op) override {
-        if (is_const_zero(condition)) {
+    void visit(const For *op) {
+        if (is_zero(condition)) {
             return;
         }
         Expr old_condition = condition;
@@ -133,8 +126,8 @@ class IsNoOp : public IRVisitor {
         condition = make_and(old_condition, make_or(condition, simplify(op->extent <= 0)));
     }
 
-    void visit(const IfThenElse *op) override {
-        if (is_const_zero(condition)) {
+    void visit(const IfThenElse *op) {
+        if (is_zero(condition)) {
             return;
         }
         Expr total_condition = condition;
@@ -151,7 +144,7 @@ class IsNoOp : public IRVisitor {
         condition = total_condition;
     }
 
-    void visit(const Call *op) override {
+    void visit(const Call *op) {
         // If the loop calls an impure function, we can't remove the
         // call to it. Most notably: image_store.
         if (!op->is_pure()) {
@@ -159,10 +152,6 @@ class IsNoOp : public IRVisitor {
             return;
         }
         IRVisitor::visit(op);
-    }
-
-    void visit(const Acquire *op) override {
-        condition = const_false();
     }
 
     template<typename LetOrLetStmt>
@@ -173,11 +162,11 @@ class IsNoOp : public IRVisitor {
         }
     }
 
-    void visit(const LetStmt *op) override {
+    void visit(const LetStmt *op) {
         visit_let(op);
     }
 
-    void visit(const Let *op) override {
+    void visit(const Let *op) {
         visit_let(op);
     }
 
@@ -202,14 +191,14 @@ class SimplifyUsingBounds : public IRMutator {
             // need to take each variable one-by-one, simplifying in
             // between to allow for cancellations of the bounds of
             // inner loops with outer loop variables.
-            auto loop = containing_loops[i - 1];
+            auto loop = containing_loops[i-1];
             if (is_const(test)) {
                 break;
             } else if (!expr_uses_var(test, loop.var)) {
                 continue;
-            } else if (loop.i.is_bounded() &&
-                       can_prove(loop.i.min == loop.i.max) &&
-                       expr_uses_var(test, loop.var)) {
+            }  else if (loop.i.is_bounded() &&
+                        can_prove(loop.i.min == loop.i.max) &&
+                        expr_uses_var(test, loop.var)) {
                 // If min == max then either the domain only has one correct value, which we
                 // can substitute directly.
                 // Need to call CSE here since simplify() is sometimes unable to simplify expr with
@@ -239,125 +228,119 @@ class SimplifyUsingBounds : public IRMutator {
             test = simplify(test);
             debug(3) << " -> " << test << "\n";
         }
-        return is_const_one(test);
+        return is_one(test);
     }
 
-    Expr visit(const Min *op) override {
+    void visit(const Min *op) {
         if (!op->type.is_int() || op->type.bits() < 32) {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         } else {
             Expr a = mutate(op->a);
             Expr b = mutate(op->b);
             Expr test = a <= b;
             if (provably_true_over_domain(a <= b)) {
-                return a;
+                expr = a;
             } else if (provably_true_over_domain(b <= a)) {
-                return b;
+                expr = b;
             } else {
-                return Min::make(a, b);
+                expr = Min::make(a, b);
             }
         }
     }
 
-    Expr visit(const Max *op) override {
+    void visit(const Max *op) {
         if (!op->type.is_int() || op->type.bits() < 32) {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         } else {
             Expr a = mutate(op->a);
             Expr b = mutate(op->b);
             if (provably_true_over_domain(a >= b)) {
-                return a;
+                expr = a;
             } else if (provably_true_over_domain(b >= a)) {
-                return b;
+                expr = b;
             } else {
-                return Max::make(a, b);
+                expr = Max::make(a, b);
             }
         }
     }
 
     template<typename Cmp>
-    Expr visit_cmp(const Cmp *op) {
-        Expr expr = IRMutator::visit(op);
+    void visit_cmp(const Cmp *op) {
+        IRMutator::visit(op);
         if (provably_true_over_domain(expr)) {
             expr = make_one(op->type);
         } else if (provably_true_over_domain(!expr)) {
             expr = make_zero(op->type);
         }
-        return expr;
     }
 
-    Expr visit(const LE *op) override {
-        return visit_cmp(op);
+    void visit(const LE *op) {
+        visit_cmp(op);
     }
 
-    Expr visit(const LT *op) override {
-        return visit_cmp(op);
+    void visit(const LT *op) {
+        visit_cmp(op);
     }
 
-    Expr visit(const GE *op) override {
-        return visit_cmp(op);
+    void visit(const GE *op) {
+        visit_cmp(op);
     }
 
-    Expr visit(const GT *op) override {
-        return visit_cmp(op);
+    void visit(const GT *op) {
+        visit_cmp(op);
     }
 
-    Expr visit(const EQ *op) override {
-        return visit_cmp(op);
+    void visit(const EQ *op) {
+        visit_cmp(op);
     }
 
-    Expr visit(const NE *op) override {
-        return visit_cmp(op);
+    void visit(const NE *op) {
+        visit_cmp(op);
     }
 
     template<typename StmtOrExpr, typename LetStmtOrLet>
     StmtOrExpr visit_let(const LetStmtOrLet *op) {
         Expr value = mutate(op->value);
-        StmtOrExpr body;
-        if (value.type() == Int(32) && is_pure(value)) {
-            containing_loops.push_back({op->name, {value, value}});
-            body = mutate(op->body);
-            containing_loops.pop_back();
-        } else {
-            body = mutate(op->body);
-        }
+        containing_loops.push_back({op->name, {value, value}});
+        StmtOrExpr body = mutate(op->body);
+        containing_loops.pop_back();
         return LetStmtOrLet::make(op->name, value, body);
     }
 
-    Expr visit(const Let *op) override {
-        return visit_let<Expr, Let>(op);
+    void visit(const Let *op) {
+        expr = visit_let<Expr, Let>(op);
     }
 
-    Stmt visit(const LetStmt *op) override {
-        return visit_let<Stmt, LetStmt>(op);
+    void visit(const LetStmt *op) {
+        stmt = visit_let<Stmt, LetStmt>(op);
     }
 
-    Stmt visit(const For *op) override {
+    void visit(const For *op) {
         // Simplify the loop bounds.
         Expr min = mutate(op->min);
         Expr extent = mutate(op->extent);
         containing_loops.push_back({op->name, {min, min + extent - 1}});
         Stmt body = mutate(op->body);
         containing_loops.pop_back();
-        return For::make(op->name, min, extent, op->for_type, op->device_api, body);
+        stmt = For::make(op->name, min, extent, op->for_type, op->device_api, body);
     }
-
 public:
     SimplifyUsingBounds(const string &v, const Interval &i) {
         containing_loops.push_back({v, i});
     }
 
-    SimplifyUsingBounds() = default;
+    SimplifyUsingBounds() {}
 };
 
 class TrimNoOps : public IRMutator {
     using IRMutator::visit;
 
-    Stmt visit(const For *op) override {
+    void visit(const For *op) {
         // Bounds of GPU loops can't depend on outer gpu loop vars
         if (CodeGen_GPU_Dev::is_gpu_var(op->name)) {
             debug(3) << "TrimNoOps found gpu loop var: " << op->name << "\n";
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
+            return;
         }
 
         Stmt body = mutate(op->body);
@@ -371,18 +354,14 @@ class TrimNoOps : public IRMutator {
 
         debug(3) << "Simplified condition is " << is_no_op.condition << "\n";
 
-        if (is_const_one(is_no_op.condition)) {
+        if (is_one(is_no_op.condition)) {
             // This loop is definitely useless
-            debug(3) << "Removed empty loop.\n"
-                     << "Old: " << Stmt(op) << "\n";
-            return Evaluate::make(0);
-        } else if (is_const_zero(is_no_op.condition)) {
+            stmt = Evaluate::make(0);
+            return;
+        } else if (is_zero(is_no_op.condition)) {
             // This loop is definitely needed
-            if (body.same_as(op->body)) {
-                return op;
-            } else {
-                return For::make(op->name, op->min, op->extent, op->for_type, op->device_api, body);
-            }
+            stmt = For::make(op->name, op->min, op->extent, op->for_type, op->device_api, body);
+            return;
         }
 
         // The condition is something interesting. Try to see if we
@@ -394,14 +373,14 @@ class TrimNoOps : public IRMutator {
 
         if (i.is_everything()) {
             // Nope.
-            return For::make(op->name, op->min, op->extent, op->for_type, op->device_api, body);
+            stmt = For::make(op->name, op->min, op->extent, op->for_type, op->device_api, body);
+            return;
         }
 
         if (i.is_empty()) {
             // Empty loop
-            debug(3) << "Removed empty loop.\n"
-                     << "Old: " << Stmt(op) << "\n";
-            return Evaluate::make(0);
+            stmt = Evaluate::make(0);
+            return;
         }
 
         // Simplify the body to take advantage of the fact that the
@@ -437,7 +416,7 @@ class TrimNoOps : public IRMutator {
 
         Expr new_extent = new_max_var - new_min_var;
 
-        Stmt stmt = For::make(op->name, new_min_var, new_extent, op->for_type, op->device_api, body);
+        stmt = For::make(op->name, new_min_var, new_extent, op->for_type, op->device_api, body);
         stmt = LetStmt::make(new_max_name, new_max, stmt);
         stmt = LetStmt::make(new_min_name, new_min, stmt);
         stmt = LetStmt::make(old_max_name, old_max, stmt);
@@ -446,17 +425,15 @@ class TrimNoOps : public IRMutator {
         debug(3) << "Rewrote loop.\n"
                  << "Old: " << Stmt(op) << "\n"
                  << "New: " << stmt << "\n";
-
-        return stmt;
     }
 };
 
-}  // namespace
+}
 
 Stmt trim_no_ops(Stmt s) {
     s = TrimNoOps().mutate(s);
     return s;
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

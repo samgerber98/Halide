@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
     f.update().parallel(r.y);
 
     // We shouldn't reach here, because there should have been a compile error.
-    printf("Success!\n");
+    printf("There should have been an error\n");
+
     return 0;
 }

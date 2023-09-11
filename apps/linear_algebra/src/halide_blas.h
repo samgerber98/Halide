@@ -4,56 +4,56 @@
 #include <cmath>
 
 #include "HalideRuntime.h"
-#include "halide_dasum.h"
-#include "halide_daxpy_impl.h"
-#include "halide_dcopy_impl.h"
-#include "halide_ddot.h"
-#include "halide_dgemm_notrans.h"
-#include "halide_dgemm_transA.h"
-#include "halide_dgemm_transAB.h"
-#include "halide_dgemm_transB.h"
-#include "halide_dgemv_notrans.h"
-#include "halide_dgemv_trans.h"
-#include "halide_dger_impl.h"
-#include "halide_dscal_impl.h"
-#include "halide_sasum.h"
-#include "halide_saxpy_impl.h"
 #include "halide_scopy_impl.h"
-#include "halide_sdot.h"
-#include "halide_sgemm_notrans.h"
-#include "halide_sgemm_transA.h"
-#include "halide_sgemm_transAB.h"
-#include "halide_sgemm_transB.h"
-#include "halide_sgemv_notrans.h"
-#include "halide_sgemv_trans.h"
-#include "halide_sger_impl.h"
+#include "halide_dcopy_impl.h"
 #include "halide_sscal_impl.h"
+#include "halide_dscal_impl.h"
+#include "halide_saxpy_impl.h"
+#include "halide_daxpy_impl.h"
+#include "halide_sdot.h"
+#include "halide_ddot.h"
+#include "halide_sasum.h"
+#include "halide_dasum.h"
+#include "halide_sgemv_notrans.h"
+#include "halide_dgemv_notrans.h"
+#include "halide_sgemv_trans.h"
+#include "halide_dgemv_trans.h"
+#include "halide_sger_impl.h"
+#include "halide_dger_impl.h"
+#include "halide_sgemm_notrans.h"
+#include "halide_dgemm_notrans.h"
+#include "halide_sgemm_transA.h"
+#include "halide_dgemm_transA.h"
+#include "halide_sgemm_transB.h"
+#include "halide_dgemm_transB.h"
+#include "halide_sgemm_transAB.h"
+#include "halide_dgemm_transAB.h"
 
-inline int halide_scopy(halide_buffer_t *x, halide_buffer_t *y) {
+inline int halide_scopy(buffer_t *x, buffer_t *y) {
     return halide_scopy_impl(0, x, nullptr, y);
 }
 
-inline int halide_dcopy(halide_buffer_t *x, halide_buffer_t *y) {
+inline int halide_dcopy(buffer_t *x, buffer_t *y) {
     return halide_dcopy_impl(0, x, nullptr, y);
 }
 
-inline int halide_sscal(float a, halide_buffer_t *x) {
+inline int halide_sscal(float a, buffer_t *x) {
     return halide_sscal_impl(a, x, nullptr, x);
 }
 
-inline int halide_dscal(double a, halide_buffer_t *x) {
+inline int halide_dscal(double a, buffer_t *x) {
     return halide_dscal_impl(a, x, nullptr, x);
 }
 
-inline int halide_saxpy(float a, halide_buffer_t *x, halide_buffer_t *y) {
+inline int halide_saxpy(float a, buffer_t *x, buffer_t *y) {
     return halide_saxpy_impl(a, x, y, y);
 }
 
-inline int halide_daxpy(double a, halide_buffer_t *x, halide_buffer_t *y) {
+inline int halide_daxpy(double a, buffer_t *x, buffer_t *y) {
     return halide_daxpy_impl(a, x, y, y);
 }
 
-inline int halide_sgemv(bool trans, float a, halide_buffer_t *A, halide_buffer_t *x, float b, halide_buffer_t *y) {
+inline int halide_sgemv(bool trans, float a, buffer_t *A, buffer_t *x, float b, buffer_t *y) {
     if (trans) {
         return halide_sgemv_trans(a, A, x, b, y, y);
     } else {
@@ -61,7 +61,7 @@ inline int halide_sgemv(bool trans, float a, halide_buffer_t *A, halide_buffer_t
     }
 }
 
-inline int halide_dgemv(bool trans, double a, halide_buffer_t *A, halide_buffer_t *x, double b, halide_buffer_t *y) {
+inline int halide_dgemv(bool trans, double a, buffer_t *A, buffer_t *x, double b, buffer_t *y) {
     if (trans) {
         return halide_dgemv_trans(a, A, x, b, y, y);
     } else {
@@ -69,15 +69,15 @@ inline int halide_dgemv(bool trans, double a, halide_buffer_t *A, halide_buffer_
     }
 }
 
-inline int halide_sger(float a, halide_buffer_t *x, halide_buffer_t *y, halide_buffer_t *A) {
-    return halide_sger_impl(a, x, y, A);
+inline int halide_sger(float a, buffer_t *x, buffer_t *y, buffer_t *A) {
+    return halide_sger_impl(a, x, y, A, A);
 }
 
-inline int halide_dger(float a, halide_buffer_t *x, halide_buffer_t *y, halide_buffer_t *A) {
-    return halide_dger_impl(a, x, y, A);
+inline int halide_dger(float a, buffer_t *x, buffer_t *y, buffer_t *A) {
+    return halide_dger_impl(a, x, y, A, A);
 }
 
-inline int halide_sgemm(bool transA, bool transB, float a, halide_buffer_t *A, halide_buffer_t *B, float b, halide_buffer_t *C) {
+inline int halide_sgemm(bool transA, bool transB, float a, buffer_t *A, buffer_t *B, float b, buffer_t *C) {
     if (transA && transB) {
         return halide_sgemm_transAB(a, A, B, b, C, C);
     } else if (transA) {
@@ -90,7 +90,7 @@ inline int halide_sgemm(bool transA, bool transB, float a, halide_buffer_t *A, h
     return -1;
 }
 
-inline int halide_dgemm(bool transA, bool transB, double a, halide_buffer_t *A, halide_buffer_t *B, double b, halide_buffer_t *C) {
+inline int halide_dgemm(bool transA, bool transB, double a, buffer_t *A, buffer_t *B, double b, buffer_t *C) {
     if (transA && transB) {
         return halide_dgemm_transAB(a, A, B, b, C, C);
     } else if (transA) {
@@ -103,17 +103,11 @@ inline int halide_dgemm(bool transA, bool transB, double a, halide_buffer_t *A, 
     return -1;
 }
 
-enum HBLAS_ORDER { HblasRowMajor = 101,
-                   HblasColMajor = 102 };
-enum HBLAS_TRANSPOSE { HblasNoTrans = 111,
-                       HblasTrans = 112,
-                       HblasConjTrans = 113 };
-enum HBLAS_UPLO { HblasUpper = 121,
-                  HblasLower = 122 };
-enum HBLAS_DIAG { HblasNonUnit = 131,
-                  HblasUnit = 132 };
-enum HBLAS_SIDE { HblasLeft = 141,
-                  HblasRight = 142 };
+enum HBLAS_ORDER {HblasRowMajor=101, HblasColMajor=102};
+enum HBLAS_TRANSPOSE {HblasNoTrans=111, HblasTrans=112, HblasConjTrans=113};
+enum HBLAS_UPLO {HblasUpper=121, HblasLower=122};
+enum HBLAS_DIAG {HblasNonUnit=131, HblasUnit=132};
+enum HBLAS_SIDE {HblasLeft=141, HblasRight=142};
 
 #ifdef __cplusplus
 extern "C" {
@@ -128,19 +122,21 @@ extern "C" {
 //                     const int incX, const float *Y, const int incY);
 // double hblas_dsdot(const int N, const float *X, const int incX, const float *Y,
 //                    const int incY);
-float hblas_sdot(const int N, const float *X, const int incX,
-                 const float *Y, const int incY);
+float  hblas_sdot(const int N, const float  *X, const int incX,
+                  const float  *Y, const int incY);
 double hblas_ddot(const int N, const double *X, const int incX,
                   const double *Y, const int incY);
+
 
 /*
  * Functions having prefixes S D SC DZ
  */
-float hblas_snrm2(const int N, const float *X, const int incX);
-float hblas_sasum(const int N, const float *X, const int incX);
+float  hblas_snrm2(const int N, const float *X, const int incX);
+float  hblas_sasum(const int N, const float *X, const int incX);
 
 double hblas_dnrm2(const int N, const double *X, const int incX);
 double hblas_dasum(const int N, const double *X, const int incX);
+
 
 /*
  * Functions having standard 4 prefixes (S D C Z)
@@ -173,6 +169,7 @@ void hblas_dcopy(const int N, const double *X, const int incX,
 void hblas_daxpy(const int N, const double alpha, const double *X,
                  const int incX, double *Y, const int incY);
 
+
 /*
  * Routines with S and D prefix only
  */
@@ -189,6 +186,7 @@ void hblas_daxpy(const int N, const double alpha, const double *X,
 //                 double *Y, const int incY, const double c, const double  s);
 // void hblas_drotm(const int N, double *X, const int incX,
 //                 double *Y, const int incY, const double *P);
+
 
 /*
  * Routines with S D C Z CS and ZD prefixes

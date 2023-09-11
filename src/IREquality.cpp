@@ -1,6 +1,6 @@
 #include "IREquality.h"
-#include "IROperator.h"
 #include "IRVisitor.h"
+#include "IROperator.h"
 
 namespace Halide {
 namespace Internal {
@@ -13,15 +13,13 @@ namespace {
 /** The class that does the work of comparing two IR nodes. */
 class IRComparer : public IRVisitor {
 public:
+
     /** Different possible results of a comparison. Unknown should
      * only occur internally due to a cache miss. */
-    enum CmpResult { Unknown,
-                     Equal,
-                     LessThan,
-                     GreaterThan };
+    enum CmpResult {Unknown, Equal, LessThan, GreaterThan};
 
     /** The result of the comparison. Should be Equal, LessThan, or GreaterThan. */
-    CmpResult result = Equal;
+    CmpResult result;
 
     /** Compare two expressions or statements and return the
      * result. Returns the result immediately if it is already
@@ -35,9 +33,7 @@ public:
      * subexpressions, it's worth passing in a cache to use.
      * Currently this is only done in common-subexpression
      * elimination. */
-    IRComparer(IRCompareCache *c = nullptr)
-        : cache(c) {
-    }
+    IRComparer(IRCompareCache *c = nullptr) : result(Equal), cache(c) {}
 
 private:
     Expr expr;
@@ -52,76 +48,53 @@ private:
     template<typename T>
     CmpResult compare_scalar(T a, T b);
 
-    void visit(const IntImm *) override;
-    void visit(const UIntImm *) override;
-    void visit(const FloatImm *) override;
-    void visit(const StringImm *) override;
-    void visit(const Cast *) override;
-    void visit(const Reinterpret *) override;
-    void visit(const Variable *) override;
-    void visit(const Add *) override;
-    void visit(const Sub *) override;
-    void visit(const Mul *) override;
-    void visit(const Div *) override;
-    void visit(const Mod *) override;
-    void visit(const Min *) override;
-    void visit(const Max *) override;
-    void visit(const EQ *) override;
-    void visit(const NE *) override;
-    void visit(const LT *) override;
-    void visit(const LE *) override;
-    void visit(const GT *) override;
-    void visit(const GE *) override;
-    void visit(const And *) override;
-    void visit(const Or *) override;
-    void visit(const Not *) override;
-    void visit(const Select *) override;
-    void visit(const Load *) override;
-    void visit(const Ramp *) override;
-    void visit(const Broadcast *) override;
-    void visit(const Call *) override;
-    void visit(const Let *) override;
-    void visit(const LetStmt *) override;
-    void visit(const AssertStmt *) override;
-    void visit(const ProducerConsumer *) override;
-    void visit(const For *) override;
-    void visit(const Acquire *) override;
-    void visit(const Store *) override;
-    void visit(const Provide *) override;
-    void visit(const Allocate *) override;
-    void visit(const Free *) override;
-    void visit(const Realize *) override;
-    void visit(const Block *) override;
-    void visit(const Fork *) override;
-    void visit(const IfThenElse *) override;
-    void visit(const Evaluate *) override;
-    void visit(const Shuffle *) override;
-    void visit(const Prefetch *) override;
-    void visit(const Atomic *) override;
-    void visit(const VectorReduce *) override;
+    void visit(const IntImm *);
+    void visit(const UIntImm *);
+    void visit(const FloatImm *);
+    void visit(const StringImm *);
+    void visit(const Cast *);
+    void visit(const Variable *);
+    void visit(const Add *);
+    void visit(const Sub *);
+    void visit(const Mul *);
+    void visit(const Div *);
+    void visit(const Mod *);
+    void visit(const Min *);
+    void visit(const Max *);
+    void visit(const EQ *);
+    void visit(const NE *);
+    void visit(const LT *);
+    void visit(const LE *);
+    void visit(const GT *);
+    void visit(const GE *);
+    void visit(const And *);
+    void visit(const Or *);
+    void visit(const Not *);
+    void visit(const Select *);
+    void visit(const Load *);
+    void visit(const Ramp *);
+    void visit(const Broadcast *);
+    void visit(const Call *);
+    void visit(const Let *);
+    void visit(const LetStmt *);
+    void visit(const AssertStmt *);
+    void visit(const ProducerConsumer *);
+    void visit(const For *);
+    void visit(const Store *);
+    void visit(const Provide *);
+    void visit(const Allocate *);
+    void visit(const Free *);
+    void visit(const Realize *);
+    void visit(const Block *);
+    void visit(const IfThenElse *);
+    void visit(const Evaluate *);
+    void visit(const Shuffle *);
+    void visit(const Prefetch *);
 };
 
 template<typename T>
 IRComparer::CmpResult IRComparer::compare_scalar(T a, T b) {
-    if (result != Equal) {
-        return result;
-    }
-
-    if constexpr (std::is_floating_point_v<T>) {
-        // NaNs are equal to each other and less than non-nans
-        if (std::isnan(a) && std::isnan(b)) {
-            result = Equal;
-            return result;
-        }
-        if (std::isnan(a)) {
-            result = LessThan;
-            return result;
-        }
-        if (std::isnan(b)) {
-            result = GreaterThan;
-            return result;
-        }
-    }
+    if (result != Equal) return result;
 
     if (a < b) {
         result = LessThan;
@@ -142,7 +115,6 @@ IRComparer::CmpResult IRComparer::compare_expr(const Expr &a, const Expr &b) {
         return result;
     }
 
-    // Undefined values are equal to each other and less than defined values
     if (!a.defined() && !b.defined()) {
         result = Equal;
         return result;
@@ -164,7 +136,7 @@ IRComparer::CmpResult IRComparer::compare_expr(const Expr &a, const Expr &b) {
     //   return result;
     // }
 
-    if (compare_scalar(a->node_type, b->node_type) != Equal) {
+    if (compare_scalar(a->type_info(), b->type_info()) != Equal) {
         return result;
     }
 
@@ -213,7 +185,7 @@ IRComparer::CmpResult IRComparer::compare_stmt(const Stmt &a, const Stmt &b) {
         return result;
     }
 
-    if (compare_scalar(a->node_type, b->node_type) != Equal) {
+    if (compare_scalar(a->type_info(), b->type_info()) != Equal) {
         return result;
     }
 
@@ -224,89 +196,18 @@ IRComparer::CmpResult IRComparer::compare_stmt(const Stmt &a, const Stmt &b) {
 }
 
 IRComparer::CmpResult IRComparer::compare_types(Type a, Type b) {
-    if (result != Equal) {
-        return result;
-    }
+    if (result != Equal) return result;
 
     compare_scalar(a.code(), b.code());
     compare_scalar(a.bits(), b.bits());
     compare_scalar(a.lanes(), b.lanes());
-
-    if (result != Equal) {
-        return result;
-    }
-
-    const halide_handle_cplusplus_type *ha = a.handle_type;
-    const halide_handle_cplusplus_type *hb = b.handle_type;
-
-    if (ha == hb) {
-        // Same handle type, or both not handles, or both void *
-        return result;
-    }
-
-    if (ha == nullptr) {
-        // void* < T*
-        result = LessThan;
-        return result;
-    }
-
-    if (hb == nullptr) {
-        // T* > void*
-        result = GreaterThan;
-        return result;
-    }
-
-    // They're both non-void handle types with distinct type info
-    // structs. We now need to distinguish between different C++
-    // pointer types (e.g. char * vs const float *). If would be nice
-    // if the structs were unique per C++ type. Then comparing the
-    // pointers above would be sufficient.  Unfortunately, different
-    // shared libraries in the same process each create a distinct
-    // struct for the same type. We therefore have to do a deep
-    // comparison of the type info fields.
-
-    compare_scalar(ha->reference_type, hb->reference_type);
-    compare_names(ha->inner_name.name, hb->inner_name.name);
-    compare_scalar(ha->inner_name.cpp_type_type, hb->inner_name.cpp_type_type);
-    compare_scalar(ha->namespaces.size(), hb->namespaces.size());
-    compare_scalar(ha->enclosing_types.size(), hb->enclosing_types.size());
-    compare_scalar(ha->cpp_type_modifiers.size(), hb->cpp_type_modifiers.size());
-
-    if (result != Equal) {
-        return result;
-    }
-
-    for (size_t i = 0; i < ha->namespaces.size(); i++) {
-        compare_names(ha->namespaces[i], hb->namespaces[i]);
-    }
-
-    if (result != Equal) {
-        return result;
-    }
-
-    for (size_t i = 0; i < ha->enclosing_types.size(); i++) {
-        compare_scalar(ha->enclosing_types[i].cpp_type_type,
-                       hb->enclosing_types[i].cpp_type_type);
-        compare_names(ha->enclosing_types[i].name,
-                      hb->enclosing_types[i].name);
-    }
-
-    if (result != Equal) {
-        return result;
-    }
-
-    for (size_t i = 0; i < ha->cpp_type_modifiers.size(); i++) {
-        compare_scalar(ha->cpp_type_modifiers[i],
-                       hb->cpp_type_modifiers[i]);
-    }
+    compare_scalar((uintptr_t)a.handle_type, (uintptr_t)b.handle_type);
 
     return result;
 }
 
 IRComparer::CmpResult IRComparer::compare_names(const string &a, const string &b) {
-    if (result != Equal) {
-        return result;
-    }
+    if (result != Equal) return result;
 
     int string_cmp = a.compare(b);
     if (string_cmp < 0) {
@@ -318,10 +219,9 @@ IRComparer::CmpResult IRComparer::compare_names(const string &a, const string &b
     return result;
 }
 
+
 IRComparer::CmpResult IRComparer::compare_expr_vector(const vector<Expr> &a, const vector<Expr> &b) {
-    if (result != Equal) {
-        return result;
-    }
+    if (result != Equal) return result;
 
     compare_scalar(a.size(), b.size());
     for (size_t i = 0; (i < a.size()) && result == Equal; i++) {
@@ -355,10 +255,6 @@ void IRComparer::visit(const Cast *op) {
     compare_expr(expr.as<Cast>()->value, op->value);
 }
 
-void IRComparer::visit(const Reinterpret *op) {
-    compare_expr(expr.as<Reinterpret>()->value, op->value);
-}
-
 void IRComparer::visit(const Variable *op) {
     const Variable *e = expr.as<Variable>();
     compare_names(e->name, op->name);
@@ -371,53 +267,23 @@ void visit_binary_operator(IRComparer *cmp, const T *op, Expr expr) {
     cmp->compare_expr(e->a, op->a);
     cmp->compare_expr(e->b, op->b);
 }
-}  // namespace
+}
 
-void IRComparer::visit(const Add *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Sub *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Mul *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Div *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Mod *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Min *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Max *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const EQ *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const NE *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const LT *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const LE *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const GT *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const GE *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const And *op) {
-    visit_binary_operator(this, op, expr);
-}
-void IRComparer::visit(const Or *op) {
-    visit_binary_operator(this, op, expr);
-}
+void IRComparer::visit(const Add *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Sub *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Mul *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Div *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Mod *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Min *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Max *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const EQ *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const NE *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const LT *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const LE *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const GT *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const GE *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const And *op) {visit_binary_operator(this, op, expr);}
+void IRComparer::visit(const Or *op) {visit_binary_operator(this, op, expr);}
 
 void IRComparer::visit(const Not *op) {
     const Not *e = expr.as<Not>();
@@ -429,6 +295,7 @@ void IRComparer::visit(const Select *op) {
     compare_expr(e->condition, op->condition);
     compare_expr(e->true_value, op->true_value);
     compare_expr(e->false_value, op->false_value);
+
 }
 
 void IRComparer::visit(const Load *op) {
@@ -436,8 +303,6 @@ void IRComparer::visit(const Load *op) {
     compare_names(op->name, e->name);
     compare_expr(e->predicate, op->predicate);
     compare_expr(e->index, op->index);
-    compare_scalar(e->alignment.modulus, op->alignment.modulus);
-    compare_scalar(e->alignment.remainder, op->alignment.remainder);
 }
 
 void IRComparer::visit(const Ramp *op) {
@@ -502,14 +367,6 @@ void IRComparer::visit(const For *op) {
     compare_stmt(s->body, op->body);
 }
 
-void IRComparer::visit(const Acquire *op) {
-    const Acquire *s = stmt.as<Acquire>();
-
-    compare_expr(s->semaphore, op->semaphore);
-    compare_expr(s->count, op->count);
-    compare_stmt(s->body, op->body);
-}
-
 void IRComparer::visit(const Store *op) {
     const Store *s = stmt.as<Store>();
 
@@ -518,8 +375,6 @@ void IRComparer::visit(const Store *op) {
     compare_expr(s->predicate, op->predicate);
     compare_expr(s->value, op->value);
     compare_expr(s->index, op->index);
-    compare_scalar(s->alignment.modulus, op->alignment.modulus);
-    compare_scalar(s->alignment.remainder, op->alignment.remainder);
 }
 
 void IRComparer::visit(const Provide *op) {
@@ -534,7 +389,6 @@ void IRComparer::visit(const Allocate *op) {
     const Allocate *s = stmt.as<Allocate>();
 
     compare_names(s->name, op->name);
-    compare_types(s->type, op->type);
     compare_expr_vector(s->extents, op->extents);
     compare_stmt(s->body, op->body);
     compare_expr(s->condition, op->condition);
@@ -561,13 +415,6 @@ void IRComparer::visit(const Realize *op) {
 
 void IRComparer::visit(const Block *op) {
     const Block *s = stmt.as<Block>();
-
-    compare_stmt(s->first, op->first);
-    compare_stmt(s->rest, op->rest);
-}
-
-void IRComparer::visit(const Fork *op) {
-    const Fork *s = stmt.as<Fork>();
 
     compare_stmt(s->first, op->first);
     compare_stmt(s->rest, op->rest);
@@ -605,39 +452,18 @@ void IRComparer::visit(const Shuffle *op) {
 }
 
 void IRComparer::visit(const Prefetch *op) {
-    const Prefetch *s = stmt.as<Prefetch>();
+    const Prefetch *s = expr.as<Prefetch>();
 
     compare_names(s->name, op->name);
-    compare_scalar(s->types.size(), op->types.size());
     compare_scalar(s->bounds.size(), op->bounds.size());
-    for (size_t i = 0; (result == Equal) && (i < s->types.size()); i++) {
-        compare_types(s->types[i], op->types[i]);
-    }
     for (size_t i = 0; (result == Equal) && (i < s->bounds.size()); i++) {
         compare_expr(s->bounds[i].min, op->bounds[i].min);
         compare_expr(s->bounds[i].extent, op->bounds[i].extent);
     }
-    compare_expr(s->condition, op->condition);
-    compare_stmt(s->body, op->body);
 }
 
-void IRComparer::visit(const Atomic *op) {
-    const Atomic *s = stmt.as<Atomic>();
+} // namespace
 
-    compare_names(s->producer_name, op->producer_name);
-    compare_names(s->mutex_name, op->mutex_name);
-    compare_stmt(s->body, op->body);
-}
-
-void IRComparer::visit(const VectorReduce *op) {
-    const VectorReduce *e = expr.as<VectorReduce>();
-
-    compare_scalar(op->op, e->op);
-    // We've already compared types, so it's enough to compare the value
-    compare_expr(op->value, e->value);
-}
-
-}  // namespace
 
 // Now the methods exposed in the header.
 bool equal(const Expr &a, const Expr &b) {
@@ -649,11 +475,6 @@ bool graph_equal(const Expr &a, const Expr &b) {
     return IRComparer(&cache).compare_expr(a, b) == IRComparer::Equal;
 }
 
-bool graph_less_than(const Expr &a, const Expr &b) {
-    IRCompareCache cache(8);
-    return IRComparer(&cache).compare_expr(a, b) == IRComparer::LessThan;
-}
-
 bool equal(const Stmt &a, const Stmt &b) {
     return IRComparer().compare_stmt(a, b) == IRComparer::Equal;
 }
@@ -661,11 +482,6 @@ bool equal(const Stmt &a, const Stmt &b) {
 bool graph_equal(const Stmt &a, const Stmt &b) {
     IRCompareCache cache(8);
     return IRComparer(&cache).compare_stmt(a, b) == IRComparer::Equal;
-}
-
-bool graph_less_than(const Stmt &a, const Stmt &b) {
-    IRCompareCache cache(8);
-    return IRComparer(&cache).compare_stmt(a, b) == IRComparer::LessThan;
 }
 
 bool IRDeepCompare::operator()(const Expr &a, const Expr &b) const {
@@ -690,15 +506,11 @@ bool ExprWithCompareCache::operator<(const ExprWithCompareCache &other) const {
 namespace {
 
 IRComparer::CmpResult flip_result(IRComparer::CmpResult r) {
-    switch (r) {
-    case IRComparer::LessThan:
-        return IRComparer::GreaterThan;
-    case IRComparer::Equal:
-        return IRComparer::Equal;
-    case IRComparer::GreaterThan:
-        return IRComparer::LessThan;
-    case IRComparer::Unknown:
-        return IRComparer::Unknown;
+    switch(r) {
+    case IRComparer::LessThan: return IRComparer::GreaterThan;
+    case IRComparer::Equal: return IRComparer::Equal;
+    case IRComparer::GreaterThan: return IRComparer::LessThan;
+    case IRComparer::Unknown: return IRComparer::Unknown;
     }
     return IRComparer::Unknown;
 }
@@ -709,10 +521,8 @@ void check_equal(const Expr &a, const Expr &b) {
     internal_assert(r == IRComparer::Equal)
         << "Error in ir_equality_test: " << r
         << " instead of " << IRComparer::Equal
-        << " when comparing:\n"
-        << a
-        << "\nand\n"
-        << b << "\n";
+        << " when comparing:\n" << a
+        << "\nand\n" << b << "\n";
 }
 
 void check_not_equal(const Expr &a, const Expr &b) {
@@ -724,13 +534,11 @@ void check_not_equal(const Expr &a, const Expr &b) {
                     flip_result(r1) == r2)
         << "Error in ir_equality_test: " << r1
         << " is not the opposite of " << r2
-        << " when comparing:\n"
-        << a
-        << "\nand\n"
-        << b << "\n";
+        << " when comparing:\n" << a
+        << "\nand\n" << b << "\n";
 }
 
-}  // namespace
+} // namespace
 
 void ir_equality_test() {
     Expr x = Variable::make(Int(32), "x");
@@ -744,16 +552,15 @@ void ir_equality_test() {
     // complexity.
     Expr e1 = x, e2 = x;
     for (int i = 0; i < 100; i++) {
-        e1 = e1 * e1 + e1;
-        e2 = e2 * e2 + e2;
+        e1 = e1*e1 + e1;
+        e2 = e2*e2 + e2;
     }
     check_equal(e1, e2);
     // These are only discovered to be not equal way down the tree:
-    e2 = e2 * e2 + e2;
+    e2 = e2*e2 + e2;
     check_not_equal(e1, e2);
 
     debug(0) << "ir_equality_test passed\n";
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}}

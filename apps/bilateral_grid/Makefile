@@ -1,55 +1,34 @@
 include ../support/Makefile.inc
 
-.PHONY: build clean test
+all: $(BIN)/filter
 
-build: $(BIN)/$(HL_TARGET)/filter
+$(BIN)/bilateral_grid_exec: bilateral_grid_generator.cpp $(GENERATOR_DEPS)
+	@-mkdir -p $(BIN)
+	$(CXX) $(CXXFLAGS) -g -fno-rtti $(filter-out %.h,$^) -o $@ $(LDFLAGS)
 
-$(GENERATOR_BIN)/bilateral_grid.generator: bilateral_grid_generator.cpp $(GENERATOR_DEPS)
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) $(filter %.cpp,$^) -o $@ $(LIBHALIDE_LDFLAGS)
+$(BIN)/bilateral_grid.a: $(BIN)/bilateral_grid_exec
+	@-mkdir -p $(BIN)
+	$^ -o $(BIN)  target=$(HL_TARGET)
 
-$(BIN)/%/bilateral_grid.a: $(GENERATOR_BIN)/bilateral_grid.generator
-	@mkdir -p $(@D)
-	$^ -g bilateral_grid -e $(GENERATOR_OUTPUTS) -o $(@D) -f bilateral_grid target=$*
+$(BIN)/viz/bilateral_grid.a: $(BIN)/bilateral_grid_exec
+	@-mkdir -p $(BIN)
+	@-mkdir -p $(BIN)/viz
+	HL_TRACE=3 $^ -o $(BIN)/viz target=$(HL_TARGET)
 
-$(BIN)/%/bilateral_grid_auto_schedule.a: $(GENERATOR_BIN)/bilateral_grid.generator
-	@mkdir -p $(@D)
-	$^ -g bilateral_grid -e $(GENERATOR_OUTPUTS) -o $(@D) -f bilateral_grid_auto_schedule target=$*-no_runtime autoscheduler=Mullapudi2016
+$(BIN)/filter: $(BIN)/bilateral_grid.a filter.cpp
+	@-mkdir -p $(BIN)
+	$(CXX) $(CXXFLAGS) -O3 -ffast-math -Wall -Werror -I$(BIN) filter.cpp $(BIN)/bilateral_grid.a -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
+$(BIN)/filter_viz: $(BIN)/viz/bilateral_grid.a filter.cpp
+	@-mkdir -p $(BIN)
+	$(CXX) $(CXXFLAGS) -O3 -ffast-math -Wall -Werror -I$(BIN)/viz filter.cpp $(BIN)/viz/bilateral_grid.a -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
 
-$(BIN)/%/filter: filter.cpp $(BIN)/%/bilateral_grid.a $(BIN)/%/bilateral_grid_auto_schedule.a
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -I$(BIN)/$* $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
+$(BIN)/bilateral_grid.mp4: $(BIN)/filter_viz viz.sh
+	@-mkdir -p $(BIN)
+	bash viz.sh $(BIN)
 
-$(BIN)/%/filter_viz: filter.cpp $(BIN)/%-trace_all/bilateral_grid.a
-	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -DNO_AUTO_SCHEDULE -I$(BIN)/$*-trace_all $^ -o $@ $(IMAGE_IO_FLAGS) $(LDFLAGS)
-
-../../bin/HalideTraceViz: ../../util/HalideTraceViz.cpp
-	$(MAKE) -C ../../ bin/HalideTraceViz
-
-$(BIN)/%/bilateral_grid.mp4: $(BIN)/%/filter_viz viz.sh ../../bin/HalideTraceViz
-	@mkdir -p $(@D)
-	HL_AVCONV=$(HL_AVCONV) bash viz.sh $(BIN)/$*
-
-$(BIN)/%/out.png: $(BIN)/%/filter
-	@mkdir -p $(@D)
-	$< $(IMAGES)/gray.png $@ 0.1 10
-
-$(BIN)/%/out.tiff: $(BIN)/%/filter
-	@mkdir -p $(@D)
-	$< $(IMAGES)/gray.png $@ 0.1 10
+$(BIN)/out.png: $(BIN)/filter
+	@-mkdir -p $(BIN)
+	$(BIN)/filter $(IMAGES)/gray.png $(BIN)/out.png 0.1 10
 
 clean:
 	rm -rf $(BIN)
-
-test: $(BIN)/$(HL_TARGET)/out.png $(BIN)/$(HL_TARGET)/out.tiff
-
-viz: $(BIN)/$(HL_TARGET)/bilateral_grid.mp4
-	$(HL_VIDEOPLAYER) $^
-
-$(BIN)/%/viz_auto.mp4: $(BIN)/%/filter_viz ../support/viz_auto.sh ../../bin/HalideTraceViz
-	@mkdir -p $(@D)
-	HL_AVCONV=$(HL_AVCONV) bash ../support/viz_auto.sh "$(BIN)/$*/filter_viz $(IMAGES)/gray_small.png $(BIN)/$*/out_small.png 0.2 0" ../../bin/HalideTraceViz $@
-
-viz_auto: $(BIN)/$(HL_TARGET)/viz_auto.mp4
-	$(HL_VIDEOPLAYER) $^

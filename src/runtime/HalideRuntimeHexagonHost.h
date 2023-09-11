@@ -1,12 +1,7 @@
 #ifndef HALIDE_HALIDERUNTIMEHEXAGONHOST_H
 #define HALIDE_HALIDERUNTIMEHEXAGONHOST_H
 
-// Don't include HalideRuntime.h if the contents of it were already pasted into a generated header above this one
-#ifndef HALIDE_HALIDERUNTIME_H
-
 #include "HalideRuntime.h"
-
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,8 +10,6 @@ extern "C" {
 /** \file
  *  Routines specific to the Halide Hexagon host-side runtime.
  */
-
-#define HALIDE_RUNTIME_HEXAGON
 
 typedef int halide_hexagon_handle_t;
 
@@ -27,31 +20,28 @@ extern const struct halide_device_interface_t *halide_hexagon_device_interface()
 extern bool halide_is_hexagon_available(void *user_context);
 
 /** The device handle for Hexagon is simply a pointer and size, stored
- * in the dev field of the halide_buffer_t. If the buffer is allocated in a
+ * in the dev field of the buffer_t. If the buffer is allocated in a
  * particular way (ion_alloc), the buffer will be shared with Hexagon
- * (not copied). The device field of the halide_buffer_t must be NULL when this
+ * (not copied). The dev field of the buffer_t must be NULL when this
  * routine is called. This call can fail due to running out of memory
  * or being passed an invalid device handle. The device and host
  * dirty bits are left unmodified. */
-extern int halide_hexagon_wrap_device_handle(void *user_context, struct halide_buffer_t *buf,
+extern int halide_hexagon_wrap_device_handle(void *user_context, struct buffer_t *buf,
                                              void *ptr, uint64_t size);
 
-/** Disconnect this halide_buffer_t from the device handle it was
- * previously wrapped around. Should only be called for a
- * halide_buffer_t that halide_hexagon_wrap_device_handle was
- * previously called on. Frees any storage associated with the binding
- * of the halide_buffer_t and the device handle, but does not free the
- * device handle. The device field of the halide_buffer_t will be NULL
- * on return. */
-extern int halide_hexagon_detach_device_handle(void *user_context, struct halide_buffer_t *buf);
+/** Disconnect this buffer_t from the device handle it was previously
+ * wrapped around. Should only be called for a buffer_t that
+ * halide_hexagon_wrap_device_handle was previously called on. Frees any
+ * storage associated with the binding of the buffer_t and the device
+ * handle, but does not free the device handle. The previously
+ * wrapped device handle is returned. The dev field of the buffer_t
+ * will be NULL on return. */
+extern void *halide_hexagon_detach_device_handle(void *user_context, struct buffer_t *buf);
 
-/** Return the underlying device handle for a halide_buffer_t. If there is
+/** Return the underlying device handle for a buffer_t. If there is
  * no device memory (dev field is NULL), this returns 0. */
-extern void *halide_hexagon_get_device_handle(void *user_context, struct halide_buffer_t *buf);
-extern uint64_t halide_hexagon_get_device_size(void *user_context, struct halide_buffer_t *buf);
-
-/** Return a pointer to the module_state. */
-extern void *halide_hexagon_get_module_state(void *user_context, void **host);
+extern void *halide_hexagon_get_device_handle(void *user_context, struct buffer_t *buf);
+extern uint64_t halide_hexagon_get_device_size(void *user_context, struct buffer_t *buf);
 
 /** Power HVX on and off. Calling a Halide pipeline will do this
  * automatically on each pipeline invocation; however, it costs a
@@ -67,23 +57,20 @@ extern void halide_hexagon_power_hvx_off_as_destructor(void *user_context, void 
 
 /** Power modes for Hexagon. */
 typedef enum halide_hexagon_power_mode_t {
-    halide_hexagon_power_low = 0,
+    halide_hexagon_power_low     = 0,
     halide_hexagon_power_nominal = 1,
-    halide_hexagon_power_turbo = 2,
-    halide_hexagon_power_default = 3,  /// Resets power to its default state.
-    halide_hexagon_power_low_plus = 4,
-    halide_hexagon_power_low_2 = 5,
-    halide_hexagon_power_nominal_plus = 6,
+    halide_hexagon_power_turbo   = 2,
+    halide_hexagon_power_default = 3, /// Resets power to its default state.
 
     // These are deprecated.
-    halide_hvx_power_low = halide_hexagon_power_low,
+    halide_hvx_power_low     = halide_hexagon_power_low,
     halide_hvx_power_nominal = halide_hexagon_power_nominal,
-    halide_hvx_power_turbo = halide_hexagon_power_turbo,
+    halide_hvx_power_turbo   = halide_hexagon_power_turbo,
     halide_hvx_power_default = halide_hexagon_power_default,
 } halide_hexagon_power_mode_t;
 
 /** More detailed power settings to control Hexagon.
- * @param set_mips - Set to TRUE to request MIPS
+ * @param set_mips - Set to TRUE to requst MIPS
  * @param mipsPerThread - mips requested per thread, to establish a minimal clock frequency per HW thread
  * @param mipsTotal - Total mips requested, to establish total number of MIPS required across all HW threads
  * @param set_bus_bw - Set to TRUE to request bus_bw
@@ -121,37 +108,26 @@ extern int halide_hexagon_set_performance_mode(void *user_context, halide_hexago
 extern int halide_hexagon_set_performance(void *user_context, halide_hexagon_power_t *perf);
 // @}
 
-/** Set the default priority for Halide Hexagon user threads:
- *   - Valid priority values range from 1 to 255
- *   - Smaller number for higher priority
- *   - The highest priority for a user thread is 1
- *   - Priority 0 is reserved for OS usage
- * If this routine is not called, the priority will default to 100.
- * This is intended to be called before dispatching any pipeline. */
-// @{
-extern int halide_hexagon_set_thread_priority(void *user_context, int priority);
-// @}
-
 /** These are forward declared here to allow clients to override the
  *  Halide Hexagon runtime. Do not call them. */
 // @{
 extern int halide_hexagon_initialize_kernels(void *user_context,
                                              void **module_ptr,
                                              const uint8_t *code, uint64_t code_size,
-                                             const uint8_t *runtime, uint64_t runtime_size);
+                                             uint32_t use_shared_object);
 extern int halide_hexagon_run(void *user_context,
+                              uint32_t use_shared_object,
                               void *module_ptr,
                               const char *name,
                               halide_hexagon_handle_t *function,
                               uint64_t arg_sizes[],
                               void *args[],
                               int arg_flags[]);
-extern void halide_hexagon_finalize_kernels(void *user_context, void *state_ptr);
-extern int halide_hexagon_device_release(void *user_context);
+extern int halide_hexagon_device_release(void* user_context);
 // @}
 
 #ifdef __cplusplus
-}  // End extern "C"
+} // End extern "C"
 #endif
 
-#endif  // HALIDE_HALIDERUNTIMEHEXAGONHOST_H
+#endif // HALIDE_HALIDERUNTIMEHEXAGONHOST_H

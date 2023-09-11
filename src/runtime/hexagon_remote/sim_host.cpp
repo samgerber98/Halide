@@ -1,30 +1,23 @@
+#include <vector>
+#include <sstream>
 #include <cassert>
 #include <memory>
 #include <mutex>
-#include <vector>
 
-#include "HexagonWrapper.h"
+#include <HalideRuntime.h>
+#include <HexagonWrapper.h>
 
 #include "sim_protocol.h"
-
-#ifdef _MSC_VER
-#define DLLEXPORT __declspec(dllexport)
-#else
-#define DLLEXPORT
-#endif
 
 typedef unsigned int handle_t;
 
 std::unique_ptr<HexagonWrapper> sim;
 
 bool debug_mode = false;
-
 int init_sim() {
-    if (sim) {
-        return 0;
-    }
+    if (sim) return 0;
 
-    sim = std::make_unique<HexagonWrapper>(HEX_CPU_V65);
+    sim = std::unique_ptr<HexagonWrapper>(new HexagonWrapper(HEX_CPU_V60));
 
     HEXAPI_Status status = HEX_STAT_SUCCESS;
 
@@ -67,20 +60,18 @@ int init_sim() {
         }
     }
 
-    // Configue various tracing capabilites.
-    struct Trace {
-        const char *env_var;
-        HEXAPI_TracingType hex_trace;
-    };
-    Trace traces[] = {
-        {"HL_HEXAGON_SIM_MIN_TRACE", HEX_TRACE_PC_MIN},
-        {"HL_HEXAGON_SIM_TRACE", HEX_TRACE_PC},
-        {"HL_HEXAGON_SIM_MEM_TRACE", HEX_TRACE_MEM},
-    };
-    for (auto i : traces) {
-        const char *trace = getenv(i.env_var);
-        if (trace && trace[0] != 0) {
-            status = sim->SetTracing(i.hex_trace, trace);
+    // Configue tracing.
+    const char *T = getenv("HL_HEXAGON_SIM_MIN_TRACE");
+    if (T && T[0] != 0) {
+        status = sim->SetTracing(HEX_TRACE_PC_MIN, T);
+        if (status != HEX_STAT_SUCCESS) {
+            printf("HexagonWrapper::SetTracing MIN failed: %d\n", status);
+            return -1;
+        }
+    } else {
+        const char *T = getenv("HL_HEXAGON_SIM_TRACE");
+        if (T && T[0] != 0) {
+            status = sim->SetTracing(HEX_TRACE_PC, T);
             if (status != HEX_STAT_SUCCESS) {
                 printf("HexagonWrapper::SetTracing failed: %d\n", status);
                 return -1;
@@ -90,7 +81,7 @@ int init_sim() {
 
     // Configure use of debugger
     int pnum = 0;
-    const char *s = getenv("HL_HEXAGON_SIM_DBG_PORT");
+    char *s = getenv("HL_HEXAGON_SIM_DBG_PORT");
     if (s && (pnum = atoi(s))) {
         printf("Debugger port: %d\n", pnum);
         status = sim->ConfigureRemoteDebug(pnum);
@@ -102,19 +93,6 @@ int init_sim() {
         }
     }
 
-    // Configure packet analysis for hexagon-prof.
-    const char *packet_analyze = getenv("HL_HEXAGON_PACKET_ANALYZE");
-    if (packet_analyze && packet_analyze[0]) {
-        status = sim->ConfigurePacketAnalysis(packet_analyze);
-        if (status != HEX_STAT_SUCCESS) {
-            printf("HexagonWrapper::ConfigurePacketAnalysis failed: %d\n", status);
-            return -1;
-        }
-    }
-
-    // Control use of dlopenbuf. This is to enable testing of the
-    // custom implementation of dlopen, which is not used whenever
-    // dlopenbuf is available.
     status = sim->EndOfConfiguration();
     if (status != HEX_STAT_SUCCESS) {
         printf("HexagonWrapper::EndOfConfiguration failed: %d\n", status);
@@ -139,16 +117,16 @@ int write_memory(int dest, const void *src, int size) {
         HEX_8u_t src_chunk;
         int chunk_size;
         if (size >= 8) {
-            src_chunk = *reinterpret_cast<const HEX_8u_t *>(src);
+            src_chunk = *reinterpret_cast<const HEX_8u_t*>(src);
             chunk_size = 8;
         } else if (size >= 4) {
-            src_chunk = *reinterpret_cast<const HEX_4u_t *>(src);
+            src_chunk = *reinterpret_cast<const HEX_4u_t*>(src);
             chunk_size = 4;
         } else if (size >= 2) {
-            src_chunk = *reinterpret_cast<const HEX_2u_t *>(src);
+            src_chunk = *reinterpret_cast<const HEX_2u_t*>(src);
             chunk_size = 2;
         } else {
-            src_chunk = *reinterpret_cast<const HEX_1u_t *>(src);
+            src_chunk = *reinterpret_cast<const HEX_1u_t*>(src);
             chunk_size = 1;
         }
         HEXAPI_Status status = sim->WriteMemory(dest, chunk_size, src_chunk);
@@ -170,13 +148,9 @@ int read_memory(void *dest, int src, int size) {
     while (size > 0) {
         // This is the same logic as in write_memory above.
         int next = 1;
-        if (size >= 8) {
-            next = 8;
-        } else if (size >= 4) {
-            next = 4;
-        } else if (size >= 2) {
-            next = 2;
-        }
+        if (size >= 8) next = 8;
+        else if (size >= 4) next = 4;
+        else if (size >= 2) next = 2;
         HEXAPI_Status status = sim->ReadMemory(src, next, dest);
         if (status != HEX_STAT_SUCCESS) {
             printf("HexagonWrapper::ReadMemory failed: %d\n", status);
@@ -204,9 +178,7 @@ int send_message(int msg, const std::vector<int> &arguments) {
         printf("HexagonWrapper::ReadSymbolValue(rpcmsg) failed: %d\n", status);
         return -1;
     }
-    if (write_memory(remote_msg, &msg, 4) != 0) {
-        return -1;
-    }
+    if (write_memory(remote_msg, &msg, 4) != 0) { return -1; }
 
     // The arguments are individual numbered variables.
     for (size_t i = 0; i < arguments.size(); i++) {
@@ -217,9 +189,7 @@ int send_message(int msg, const std::vector<int> &arguments) {
             printf("HexagonWrapper::ReadSymbolValue(%s) failed: %d\n", rpc_arg.c_str(), status);
             return -1;
         }
-        if (write_memory(remote_arg, &arguments[i], 4) != 0) {
-            return -1;
-        }
+        if (write_memory(remote_arg, &arguments[i], 4) != 0) { return -1; }
     }
 
     HEX_4u_t remote_ret = 0;
@@ -294,11 +264,8 @@ public:
     int data;
     int dataLen;
 
-    remote_buffer()
-        : data(0), dataLen(0) {
-    }
-    remote_buffer(int dataLen)
-        : dataLen(dataLen) {
+    remote_buffer() : data(0), dataLen(0) {}
+    remote_buffer(int dataLen) : dataLen(dataLen) {
         if (dataLen > 0) {
             data = send_message(Message::Alloc, {dataLen});
             if (data == 0) {
@@ -308,17 +275,14 @@ public:
             data = 0;
         }
     }
-    remote_buffer(const void *data, int dataLen)
-        : remote_buffer(dataLen) {
+    remote_buffer(const void *data, int dataLen) : remote_buffer(dataLen) {
         if (this->data != 0) {
             // Return value ignored, this is a constructor, we don't
             // have exceptions, and we already printed an error.
             write_memory(this->data, data, dataLen);
         }
     }
-    remote_buffer(const host_buffer &host_buf)
-        : remote_buffer(host_buf.data, host_buf.dataLen) {
-    }
+    remote_buffer(const host_buffer &host_buf) : remote_buffer(host_buf.data, host_buf.dataLen) {}
 
     ~remote_buffer() {
         if (data != 0) {
@@ -327,12 +291,11 @@ public:
     }
 
     // Enable usage with std::vector.
-    remote_buffer(remote_buffer &&move) noexcept
-        : remote_buffer() {
+    remote_buffer(remote_buffer &&move) : remote_buffer() {
         std::swap(data, move.data);
         std::swap(dataLen, move.dataLen);
     }
-    remote_buffer &operator=(remote_buffer &&move) noexcept {
+    remote_buffer &operator=(remote_buffer &&move) {
         std::swap(data, move.data);
         std::swap(dataLen, move.dataLen);
         return *this;
@@ -350,34 +313,27 @@ std::mutex mutex;
 
 extern "C" {
 
-DLLEXPORT
-int halide_hexagon_remote_load_library(const char *soname, int sonameLen, const unsigned char *code, int codeLen, handle_t *module_ptr) {
+int halide_hexagon_remote_initialize_kernels_v2(const unsigned char *code, int codeLen,
+                                                int use_shared_object,
+                                                handle_t *module_ptr) {
     std::lock_guard<std::mutex> guard(mutex);
 
     int ret = init_sim();
-    if (ret != 0) {
-        return -1;
-    }
-
+    if (ret != 0) return -1;
     // Copy the pointer arguments to the simulator.
-    remote_buffer remote_soname(soname, sonameLen);
     remote_buffer remote_code(code, codeLen);
     remote_buffer remote_module_ptr(module_ptr, 4);
 
     // Run the init kernels command.
-    ret = send_message(Message::LoadLibrary, {remote_soname.data, sonameLen, remote_code.data, codeLen, remote_module_ptr.data});
-    if (ret != 0) {
-        return ret;
-    }
+    ret = send_message(Message::InitKernels, {remote_code.data, codeLen, use_shared_object, remote_module_ptr.data});
+    if (ret != 0) return ret;
 
     // Get the module ptr.
     ret = read_memory(module_ptr, remote_module_ptr.data, 4);
 
     return ret;
 }
-
-DLLEXPORT
-int halide_hexagon_remote_get_symbol_v4(handle_t module_ptr, const char *name, int nameLen, handle_t *sym) {
+int halide_hexagon_remote_get_symbol_v3(handle_t module_ptr, const char* name, int nameLen, int use_shared_object, handle_t* sym) {
     std::lock_guard<std::mutex> guard(mutex);
 
     assert(sim);
@@ -386,12 +342,11 @@ int halide_hexagon_remote_get_symbol_v4(handle_t module_ptr, const char *name, i
     remote_buffer remote_name(name, nameLen);
 
     // Run the init kernels command.
-    *sym = send_message(Message::GetSymbol, {static_cast<int>(module_ptr), remote_name.data, nameLen});
+    *sym = send_message(Message::GetSymbol, {static_cast<int>(module_ptr), remote_name.data, nameLen, use_shared_object});
 
     return *sym != 0 ? 0 : -1;
 }
 
-DLLEXPORT
 int halide_hexagon_remote_run(handle_t module_ptr, handle_t function,
                               const host_buffer *input_buffersPtrs, int input_buffersLen,
                               host_buffer *output_buffersPtrs, int output_buffersLen,
@@ -415,9 +370,9 @@ int halide_hexagon_remote_run(handle_t module_ptr, handle_t function,
     }
 
     // Copy the pointer arguments to the simulator.
-    remote_buffer remote_input_buffersPtrs(input_buffersLen ? remote_input_buffers.data() : nullptr, input_buffersLen * sizeof(remote_buffer));
-    remote_buffer remote_output_buffersPtrs(output_buffersLen ? remote_output_buffers.data() : nullptr, output_buffersLen * sizeof(remote_buffer));
-    remote_buffer remote_input_scalarsPtrs(input_scalarsLen ? remote_input_scalars.data() : nullptr, input_scalarsLen * sizeof(remote_buffer));
+    remote_buffer remote_input_buffersPtrs(&remote_input_buffers[0], input_buffersLen * sizeof(remote_buffer));
+    remote_buffer remote_output_buffersPtrs(&remote_output_buffers[0], output_buffersLen * sizeof(remote_buffer));
+    remote_buffer remote_input_scalarsPtrs(&remote_input_scalars[0], input_scalarsLen * sizeof(remote_buffer));
 
     HEX_8u_t cycles_begin = 0;
     sim->GetSimulatedCycleCount(&cycles_begin);
@@ -429,9 +384,7 @@ int halide_hexagon_remote_run(handle_t module_ptr, handle_t function,
          remote_input_buffersPtrs.data, input_buffersLen,
          remote_output_buffersPtrs.data, output_buffersLen,
          remote_input_scalarsPtrs.data, input_scalarsLen});
-    if (ret != 0) {
-        return ret;
-    }
+    if (ret != 0) return ret;
 
     HEX_8u_t cycles_end = 0;
     sim->GetSimulatedCycleCount(&cycles_end);
@@ -444,16 +397,13 @@ int halide_hexagon_remote_run(handle_t module_ptr, handle_t function,
     // Copy the outputs back.
     for (int i = 0; i < output_buffersLen; i++) {
         ret = read_memory(output_buffersPtrs[i].data, remote_output_buffers[i].data, output_buffersPtrs[i].dataLen);
-        if (ret != 0) {
-            return ret;
-        }
+        if (ret != 0) return ret;
     }
 
     return ret;
 }
 
-DLLEXPORT
-int halide_hexagon_remote_release_library(handle_t module_ptr) {
+int halide_hexagon_remote_release_kernels(handle_t module_ptr, int codeLen) {
     std::lock_guard<std::mutex> guard(mutex);
 
     if (!sim) {
@@ -472,38 +422,33 @@ int halide_hexagon_remote_release_library(handle_t module_ptr) {
             printf("%s\n", Buf);
         }
     }
-    return send_message(Message::ReleaseLibrary, {static_cast<int>(module_ptr)});
+    return send_message(Message::ReleaseKernels, {static_cast<int>(module_ptr), codeLen});
 }
 
-DLLEXPORT
 void halide_hexagon_host_malloc_init() {
 }
 
-DLLEXPORT
 void halide_hexagon_host_malloc_deinit() {
 }
 
-DLLEXPORT
 void *halide_hexagon_host_malloc(size_t x) {
     // Allocate enough space for aligning the pointer we return.
     const size_t alignment = 4096;
     void *orig = malloc(x + alignment);
-    if (orig == nullptr) {
-        return nullptr;
+    if (orig == NULL) {
+        return NULL;
     }
 
     // We want to store the original pointer prior to the pointer we return.
-    void *ptr = (void *)(((size_t)orig + alignment + sizeof(void *) - 1) & ~(alignment - 1));
+    void *ptr = (void *)(((size_t)orig + alignment + sizeof(void*) - 1) & ~(alignment - 1));
     ((void **)ptr)[-1] = orig;
     return ptr;
 }
 
-DLLEXPORT
 void halide_hexagon_host_free(void *ptr) {
-    free(((void **)ptr)[-1]);
+    free(((void**)ptr)[-1]);
 }
 
-DLLEXPORT
 int halide_hexagon_remote_poll_profiler_state(int *func, int *threads) {
     // The stepping code periodically grabs the remote value of
     // current_func for us.
@@ -511,9 +456,5 @@ int halide_hexagon_remote_poll_profiler_state(int *func, int *threads) {
     *threads = 1;
     return 0;
 }
-DLLEXPORT
-int halide_hexagon_remote_profiler_set_current_func(int current_func) {
-    profiler_current_func = current_func;
-    return 0;
-}
+
 }  // extern "C"

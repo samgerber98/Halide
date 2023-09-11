@@ -1,43 +1,33 @@
-cmake_minimum_required(VERSION 3.22)
-project(camera_pipe)
-
-enable_testing()
-
-# Set up language settings
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED YES)
-set(CMAKE_CXX_EXTENSIONS NO)
-
-# Find Halide
-find_package(Halide REQUIRED)
-
 # Generator
-add_halide_generator(camera_pipe.generator
-                     SOURCES camera_pipe_generator.cpp
-                     LINK_LIBRARIES Halide::Tools)
+halide_add_generator(camera_pipe.generator
+                     SRCS camera_pipe_generator.cpp)
+halide_add_aot_library(camera_pipe
+                       GENERATOR_TARGET camera_pipe.generator
+                       GENERATOR_ARGS target=host)
 
-# Filters
-add_halide_library(camera_pipe FROM camera_pipe.generator)
-add_halide_library(camera_pipe_auto_schedule FROM camera_pipe.generator
-                   GENERATOR camera_pipe
-                   AUTOSCHEDULER Halide::Mullapudi2016)
+# fcam
+# FIXME: Set -O3 here
+add_library(fcam fcam/Demosaic.cpp fcam/Demosaic_ARM.cpp)
+FIND_PACKAGE(OpenMP)
+if (OPENMP_FOUND)
+  target_compile_options(fcam PUBLIC "-fopenmp")
+endif()
+if (NOT MSVC)
+  target_compile_options(fcam PRIVATE "-std=c++11")
+endif()
 
-# Main executable
-add_executable(camera_pipe_process process.cpp)
-target_link_libraries(camera_pipe_process
-                      PRIVATE
-                      Halide::ImageIO
-                      camera_pipe
-                      camera_pipe_auto_schedule)
+# Final executable
+add_executable(process process.cpp)
+halide_add_aot_library_dependency(process camera_pipe)
+target_link_libraries(process PRIVATE ${curved_lib} fcam)
+use_image_io(process)
 
-# Test that the app actually works!
-set(IMAGE ${CMAKE_CURRENT_LIST_DIR}/../images/bayer_raw.png)
-if (EXISTS ${IMAGE})
-    configure_file(${IMAGE} bayer_raw.png COPYONLY)
-    add_test(NAME camera_pipe_process
-             COMMAND camera_pipe_process bayer_raw.png 3700 2.0 50 1.0 5 out.png)
-    set_tests_properties(camera_pipe_process PROPERTIES
-                         LABELS camera_pipe
-                         PASS_REGULAR_EXPRESSION "Success!"
-                         SKIP_REGULAR_EXPRESSION "\\[SKIP\\]")
-endif ()
+if (NOT MSVC)
+  target_compile_options(process PRIVATE "-std=c++11" "-O2" "-msse2")
+  if (OPENMP_FOUND)
+    target_compile_options(process PRIVATE ${OpenMP_CXX_FLAGS})
+    target_link_libraries(process PRIVATE ${OpenMP_CXX_FLAGS})
+  else()
+    target_compile_options(process PRIVATE "-Wno-unknown-pragmas")
+  endif()
+endif()

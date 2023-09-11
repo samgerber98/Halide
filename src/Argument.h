@@ -6,28 +6,13 @@
  * generated halide pipeline
  */
 
+#include "Error.h"
 #include "Expr.h"
 #include "Type.h"
+#include "Buffer.h"
 #include "runtime/HalideRuntime.h"
 
 namespace Halide {
-
-template<typename T, int Dims>
-class Buffer;
-
-struct ArgumentEstimates {
-    /** If this is a scalar argument, then these are its default, min, max, and estimated values.
-     * For buffer arguments, all should be undefined. */
-    Expr scalar_def, scalar_min, scalar_max, scalar_estimate;
-
-    /** If this is a buffer argument, these are the estimated min and
-     * extent for each dimension.  If there are no estimates,
-     * buffer_estimates.size() can be zero; otherwise, it must always
-     * equal the dimensions */
-    Region buffer_estimates;
-
-    bool operator==(const ArgumentEstimates &rhs) const;
-};
 
 /**
  * A struct representing an argument to a halide-generated
@@ -54,61 +39,55 @@ struct Argument {
         InputBuffer = halide_argument_kind_input_buffer,
         OutputBuffer = halide_argument_kind_output_buffer
     };
-    Kind kind = InputScalar;
+    Kind kind;
 
     /** If kind == InputBuffer|OutputBuffer, this is the dimensionality of the buffer.
      * If kind == InputScalar, this value is ignored (and should always be set to zero) */
-    uint8_t dimensions = 0;
+    uint8_t dimensions;
 
     /** If this is a scalar parameter, then this is its type.
      *
-     * If this is a buffer parameter, this this is the type of its
-     * elements.
+     * If this is a buffer parameter, this is used to determine elem_size
+     * of the buffer_t.
      *
-     * Note that type.lanes should always be 1 here. */
+     * Note that type.width should always be 1 here. */
     Type type;
 
-    /* The estimates (if any) and default/min/max values (if any) for this Argument. */
-    ArgumentEstimates argument_estimates;
+    /** If this is a scalar parameter, then these are its default, min, max values.
+     * By default, they are left unset, implying "no default, no min, no max". */
+    Expr def, min, max;
 
-    Argument() = default;
+    Argument() : kind(InputScalar), dimensions(0) {}
     Argument(const std::string &_name, Kind _kind, const Type &_type, int _dimensions,
-             const ArgumentEstimates &argument_estimates);
-
-    // Not explicit, so that you can put Buffer in an argument list,
-    // to indicate that it shouldn't be baked into the object file,
-    // but instead received as an argument at runtime
-    template<typename T, int Dims>
-    Argument(Buffer<T, Dims> im)
-        : name(im.name()),
-          kind(InputBuffer),
-          dimensions(im.dimensions()),
-          type(im.type()) {
+                Expr _def = Expr(),
+                Expr _min = Expr(),
+                Expr _max = Expr()) :
+        name(_name), kind(_kind), dimensions((uint8_t) _dimensions), type(_type), def(_def), min(_min), max(_max) {
+        internal_assert(_dimensions >= 0 && _dimensions <= 255);
+        user_assert(!(is_scalar() && dimensions != 0))
+            << "Scalar Arguments must specify dimensions of 0";
+        user_assert(!(is_buffer() && def.defined()))
+            << "Scalar default must not be defined for Buffer Arguments";
+        user_assert(!(is_buffer() && min.defined()))
+            << "Scalar min must not be defined for Buffer Arguments";
+        user_assert(!(is_buffer() && max.defined()))
+            << "Scalar max must not be defined for Buffer Arguments";
     }
 
-    bool is_buffer() const {
-        return kind == InputBuffer || kind == OutputBuffer;
-    }
-    bool is_scalar() const {
-        return kind == InputScalar;
-    }
+    template<typename T>
+    Argument(Buffer<T> im) :
+        name(im.name()),
+        kind(InputBuffer),
+        dimensions(im.dimensions()),
+        type(im.type()) {}
 
-    bool is_input() const {
-        return kind == InputScalar || kind == InputBuffer;
-    }
-    bool is_output() const {
-        return kind == OutputBuffer;
-    }
+    bool is_buffer() const { return kind == InputBuffer || kind == OutputBuffer; }
+    bool is_scalar() const { return kind == InputScalar; }
 
-    bool operator==(const Argument &rhs) const {
-        return name == rhs.name &&
-               kind == rhs.kind &&
-               dimensions == rhs.dimensions &&
-               type == rhs.type &&
-               argument_estimates == rhs.argument_estimates;
-    }
+    bool is_input() const { return kind == InputScalar || kind == InputBuffer; }
+    bool is_output() const { return kind == OutputBuffer; }
 };
 
-}  // namespace Halide
+}
 
 #endif

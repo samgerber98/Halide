@@ -5,7 +5,7 @@ using namespace Halide;
 
 int main(int argc, char **argv) {
     if (!get_jit_target_from_environment().has_gpu_feature()) {
-        printf("[SKIP] No GPU target enabled.\n");
+        printf("Not running test because no gpu feature enabled in target.\n");
         return 0;
     }
 
@@ -35,9 +35,9 @@ int main(int argc, char **argv) {
     h.realize(reference);
 
     for (int i = 1; i < 8; i++) {
-        gpu_f.set((i & 1) != 0);
-        gpu_g.set((i & 2) != 0);
-        gpu_h.set((i & 4) != 0);
+        gpu_f.set((bool)(i & 1));
+        gpu_g.set((bool)(i & 2));
+        gpu_h.set((bool)(i & 4));
 
         h.realize(out);
 
@@ -45,7 +45,7 @@ int main(int argc, char **argv) {
         uint32_t err = evaluate<uint32_t>(sum(abs(out(r) - reference(r))));
         if (err) {
             printf("Incorrect results for test %d\n", i);
-            return 1;
+            return -1;
         }
     }
 

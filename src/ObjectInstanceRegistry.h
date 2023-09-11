@@ -5,11 +5,13 @@
  *
  * Provides a single global registry of Generators, GeneratorParams,
  * and Params indexed by this pointer. This is used for finding the
- * parameters inside of a Generator.
+ * parameters inside of a Generator. NOTE: this is threadsafe only
+ * if you are compiling with C++11 enabled.
  */
 
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <map>
 #include <mutex>
 #include <vector>
@@ -57,37 +59,31 @@ public:
     static void unregister_instance(void *this_ptr);
 
     /** Returns the list of subject pointers for objects that have
-     * been directly registered within the given range. If there is
-     * another containing object inside the range, instances within
-     * that object are skipped.
+     *   been directly registered within the given range. If there is
+     *   another containing object inside the range, instances within
+     *   that object are skipped.
      */
-    static std::vector<std::pair<void *, Kind>> instances_in_range(void *start, size_t size);
+    static std::vector<void *> instances_in_range(void *start, size_t size, Kind kind);
 
 private:
     static ObjectInstanceRegistry &get_registry();
 
     struct InstanceInfo {
-        void *subject_ptr = nullptr;  // May be different from the this_ptr in the key
-        size_t size = 0;              // May be 0 for params
-        Kind kind = Invalid;
-        bool registered_for_introspection = false;
+        void *subject_ptr;  // May be different from the this_ptr in the key
+        size_t size;  // May be 0 for params
+        Kind kind;
+        bool registered_for_introspection;
 
-        InstanceInfo() = default;
+        InstanceInfo() : subject_ptr(nullptr), size(0), kind(Invalid), registered_for_introspection(false) {}
         InstanceInfo(size_t size, Kind kind, void *subject_ptr, bool registered_for_introspection)
-            : subject_ptr(subject_ptr), size(size), kind(kind), registered_for_introspection(registered_for_introspection) {
-        }
+            : subject_ptr(subject_ptr), size(size), kind(kind), registered_for_introspection(registered_for_introspection) {}
     };
 
     std::mutex mutex;
     std::map<uintptr_t, InstanceInfo> instances;
 
-    ObjectInstanceRegistry() = default;
-
-public:
-    ObjectInstanceRegistry(const ObjectInstanceRegistry &) = delete;
-    ObjectInstanceRegistry &operator=(const ObjectInstanceRegistry &) = delete;
-    ObjectInstanceRegistry(ObjectInstanceRegistry &&) = delete;
-    ObjectInstanceRegistry &operator=(ObjectInstanceRegistry &&) = delete;
+    ObjectInstanceRegistry() {}
+    ObjectInstanceRegistry(ObjectInstanceRegistry &rhs);  // unimplemented
 };
 
 }  // namespace Internal

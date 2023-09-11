@@ -3,12 +3,12 @@
 // This lesson more precisely describes Halide's type system.
 
 // On linux, you can compile and run it like so:
-// g++ lesson_14*.cpp -g -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -lpthread -ldl -o lesson_14 -std=c++17
-// LD_LIBRARY_PATH=<path/to/libHalide.so> ./lesson_14
+// g++ lesson_14*.cpp -g -I ../include -L ../bin -lHalide -lpthread -ldl -o lesson_14 -std=c++11
+// LD_LIBRARY_PATH=../bin ./lesson_14
 
 // On os x:
-// g++ lesson_14*.cpp -g -I <path/to/Halide.h> -L <path/to/libHalide.so> -lHalide -o lesson_14 -std=c++17
-// DYLD_LIBRARY_PATH=<path/to/libHalide.dylib> ./lesson_14
+// g++ lesson_14*.cpp -g -I ../include -L ../bin -lHalide -o lesson_14 -std=c++11
+// DYLD_LIBRARY_PATH=../bin ./lesson_14
 
 // If you have the entire Halide source tree, you can also build it by
 // running:
@@ -36,7 +36,8 @@ int main(int argc, char **argv) {
     Type valid_halide_types[] = {
         UInt(8), UInt(16), UInt(32), UInt(64),
         Int(8), Int(16), Int(32), Int(64),
-        Float(32), Float(64), Handle()};
+        Float(32), Float(64), Handle()
+    };
 
     // Constructing and inspecting types.
     {
@@ -79,13 +80,14 @@ int main(int argc, char **argv) {
         // You can also query any defined Func for the types it produces.
         Func f1;
         f1(x) = cast<uint8_t>(x);
-        assert(f1.types()[0] == UInt(8));
+        assert(f1.output_types()[0] == UInt(8));
 
         Func f2;
         f2(x) = {x, sin(x)};
-        assert(f2.types()[0] == Int(32) &&
-               f2.types()[1] == Float(32));
+        assert(f2.output_types()[0] == Int(32) &&
+               f2.output_types()[1] == Float(32));
     }
+
 
     // Type promotion rules.
     {
@@ -183,7 +185,7 @@ int main(int argc, char **argv) {
         // Handle is used to represent opaque pointers. Applying
         // type_of to any pointer type will return Handle()
         assert(type_of<void *>() == Handle());
-        assert(type_of<const char *const **>() == Handle());
+        assert(type_of<const char * const **>() == Handle());
 
         // Handles are always stored as 64-bit, regardless of the compilation
         // target.
@@ -220,7 +222,7 @@ Expr average(Expr a, Expr b) {
     if (a.type().is_float()) {
         // The '2' will be promoted to the floating point type due to
         // rule 3 above.
-        return (a + b) / 2;
+        return (a + b)/2;
     }
 
     // For integer types, we must compute the intermediate value in a
@@ -229,5 +231,5 @@ Expr average(Expr a, Expr b) {
     Type wider = narrow.with_bits(narrow.bits() * 2);
     a = cast(wider, a);
     b = cast(wider, b);
-    return cast(narrow, (a + b) / 2);
+    return cast(narrow, (a + b)/2);
 }

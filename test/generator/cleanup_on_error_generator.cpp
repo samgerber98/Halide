@@ -4,9 +4,7 @@ namespace {
 
 class CleanupOnError : public Halide::Generator<CleanupOnError> {
 public:
-    Output<Buffer<int32_t, 1>> output{"output"};
-
-    void generate() {
+    Func build() {
         Var x;
 
         // This allocation is going to succeed
@@ -16,9 +14,7 @@ public:
         f.compute_root();
 
         Target target = get_target();
-        if (target.has_gpu_feature() && !target.has_feature(Target::Metal)) {
-            // Skip Metal, because it uses zero-copy, which breaks the
-            // assumptions of the test.
+        if (target.has_gpu_feature()) {
             Var xo, xi;
             f.gpu_tile(x, xo, xi, 16);
         }
@@ -27,14 +23,17 @@ public:
         // halide_malloc to make it fail). The first allocation should
         // be cleaned up when the second one fails.
         Func g;
-        g(x) = f(2 * x) + f(2 * x + 1);
+        g(x) = f(2*x) + f(2*x+1);
 
         g.compute_root();
 
-        output(x) = g(x) + 1;
+        Func h;
+        h(x) = g(x) + 1;
+
+        return h;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<CleanupOnError> register_my_gen{"cleanup_on_error"};
 
-HALIDE_REGISTER_GENERATOR(CleanupOnError, cleanup_on_error)
+}  // namespace

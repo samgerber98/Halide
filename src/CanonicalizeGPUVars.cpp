@@ -11,8 +11,8 @@ namespace Halide {
 namespace Internal {
 
 using std::map;
-using std::string;
 using std::vector;
+using std::string;
 
 namespace {
 string thread_names[] = {"__thread_id_x", "__thread_id_y", "__thread_id_z", "__thread_id_w"};
@@ -29,53 +29,62 @@ string get_block_name(int index) {
 }
 
 class CountGPUBlocksThreads : public IRVisitor {
+    string prefix; // Producer name + stage
+
     using IRVisitor::visit;
 
-    // Counters that track the number of blocks, threads, and lanes loops that
-    // we're inside of, respectively. Lanes loops also count as threads loops.
-    int nb = 0, nt = 0, nl = 0;
-
-    void visit(const For *op) override {
-        // Figure out how much to increment each counter by based on the loop
-        // type.
-        int db = op->for_type == ForType::GPUBlock;
-        int dl = op->for_type == ForType::GPULane;
-        int dt = op->for_type == ForType::GPUThread;
-
-        // The threads counter includes lanes loops
-        dt += dl;
-
-        // Increment counters
-        nb += db;
-        nl += dl;
-        nt += dt;
-
-        // Update the maximum counter values seen.
-        nblocks = std::max(nb, nblocks);
-        nthreads = std::max(nt, nthreads);
-        nlanes = std::max(nl, nlanes);
-
-        // Visit the body
+    void visit(const For *op) {
+        if (starts_with(op->name, prefix)) {
+            if (op->for_type == ForType::GPUBlock) {
+                nblocks++;
+            } else if (op->for_type == ForType::GPUThread) {
+                nthreads++;
+            }
+        }
         IRVisitor::visit(op);
+    }
 
-        // Decrement counters
-        nb -= db;
-        nl -= dl;
-        nt -= dt;
+    void visit(const IfThenElse *op) {
+        op->condition.accept(this);
+
+        int old_nblocks = nblocks;
+        int old_nthreads = nthreads;
+        op->then_case.accept(this);
+
+        if (op->else_case.defined()) {
+            int then_nblocks = nblocks;
+            int then_nthreads = nthreads;
+            nblocks = old_nblocks;
+            nthreads = old_nthreads;
+            op->else_case.accept(this);
+            nblocks = std::max(then_nblocks, nblocks);
+            nthreads = std::max(then_nthreads, nthreads);
+        }
     }
 
 public:
-    // The maximum values hit by the counters above, which tells us the nesting
-    // depth of each type of loop within a Stmt.
-    int nblocks = 0;
-    int nthreads = 0;
-    int nlanes = 0;
+    CountGPUBlocksThreads(const string &p) : prefix(p), nblocks(0), nthreads(0) {}
+    int nblocks;
+    int nthreads;
 };
 
 class CanonicalizeGPUVars : public IRMutator {
     map<string, string> gpu_vars;
 
     using IRMutator::visit;
+
+    string gpu_name(vector<string> v, const string &new_var) {
+        v.push_back(new_var);
+
+        std::ostringstream stream;
+        for (size_t i = 0; i < v.size(); ++i) {
+            stream << v[i];
+            if (i != v.size() - 1) {
+                stream << ".";
+            }
+        }
+        return stream.str();
+    }
 
     string find_replacement(const string &suffix, const string &name) {
         vector<string> v = split_string(name, suffix);
@@ -99,17 +108,19 @@ class CanonicalizeGPUVars : public IRMutator {
         }
     }
 
-    Stmt visit(const For *op) override {
+    void visit(const For *op) {
         string name = op->name;
         Expr min = mutate(op->min);
         Expr extent = mutate(op->extent);
         Stmt body = mutate(op->body);
 
         if ((op->for_type == ForType::GPUBlock) ||
-            (op->for_type == ForType::GPUThread) ||
-            (op->for_type == ForType::GPULane)) {
+            (op->for_type == ForType::GPUThread)) {
 
-            CountGPUBlocksThreads counter;
+            vector<string> v = split_string(op->name, ".");
+            internal_assert(v.size() > 2);
+
+            CountGPUBlocksThreads counter(v[0] + "." + v[1]);
             op->body.accept(&counter);
             internal_assert(counter.nblocks <= 4)
                 << op->name << " can only have maximum of 4 block dimensions\n";
@@ -117,14 +128,11 @@ class CanonicalizeGPUVars : public IRMutator {
                 << op->name << " can only have maximum of 4 thread dimensions\n";
 
             if (op->for_type == ForType::GPUBlock) {
-                name += "." + get_block_name(counter.nblocks);
+                name = gpu_name(v, get_block_name(counter.nblocks));
                 debug(5) << "Replacing " << op->name << " with GPU block name " << name << "\n";
             } else if (op->for_type == ForType::GPUThread) {
-                name += "." + get_thread_name(counter.nthreads);
+                name = gpu_name(v, get_thread_name(counter.nthreads));
                 debug(5) << "Replacing " << op->name << " with GPU thread name " << name << "\n";
-            } else if (op->for_type == ForType::GPULane) {
-                user_assert(counter.nlanes == 0) << "Cannot nest multiple loops over gpu lanes: " << name << "\n";
-                name += "." + get_thread_name(0);
             }
 
             if (name != op->name) {
@@ -141,36 +149,34 @@ class CanonicalizeGPUVars : public IRMutator {
             min.same_as(op->min) &&
             extent.same_as(op->extent) &&
             body.same_as(op->body)) {
-            return op;
+            stmt = op;
         } else {
-            return For::make(name, min, extent, op->for_type, op->device_api, body);
+            stmt = For::make(name, min, extent, op->for_type, op->device_api, body);
         }
     }
 
-    Stmt visit(const LetStmt *op) override {
-        vector<std::pair<string, Expr>> lets;
-        Stmt result;
 
-        do {
-            lets.emplace_back(op->name, mutate(op->value));
-            result = op->body;
-        } while ((op = op->body.as<LetStmt>()));
+    void visit(const LetStmt *op) {
+        Expr value = mutate(op->value);
+        Stmt body = mutate(op->body);
 
-        result = mutate(result);
-
-        for (auto it = lets.rbegin(); it != lets.rend(); it++) {
-            string name = canonicalize_let(it->first);
-            if (name != it->first) {
-                Expr new_var = Variable::make(Int(32), name);
-                result = substitute(it->first, new_var, result);
-            }
-            result = LetStmt::make(name, it->second, result);
+        string name = canonicalize_let(op->name);
+        if (name != op->name) {
+            Expr new_var = Variable::make(Int(32), name);
+            value = substitute(op->name, new_var, value);
+            body = substitute(op->name, new_var, body);
         }
 
-        return result;
+        if ((name == op->name) &&
+            value.same_as(op->value) &&
+            body.same_as(op->body)) {
+            stmt = op;
+        } else {
+            stmt = LetStmt::make(name, value, body);
+        }
     }
 
-    Stmt visit(const IfThenElse *op) override {
+    void visit(const IfThenElse *op) {
         Expr condition = mutate(op->condition);
 
         map<string, string> old_gpu_vars;
@@ -183,14 +189,14 @@ class CanonicalizeGPUVars : public IRMutator {
         if (condition.same_as(op->condition) &&
             then_case.same_as(op->then_case) &&
             else_case.same_as(op->else_case)) {
-            return op;
+            stmt = op;
         } else {
-            return IfThenElse::make(condition, then_case, else_case);
+            stmt = IfThenElse::make(condition, then_case, else_case);
         }
     }
 };
 
-}  // anonymous namespace
+} // anonymous namespace
 
 Stmt canonicalize_gpu_vars(Stmt s) {
     CanonicalizeGPUVars canonicalizer;
@@ -198,5 +204,5 @@ Stmt canonicalize_gpu_vars(Stmt s) {
     return s;
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

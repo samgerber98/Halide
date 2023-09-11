@@ -1,8 +1,8 @@
 #include "HalideBuffer.h"
 
+#include <stdint.h>
 #include <iostream>
 #include <limits>
-#include <stdint.h>
 #include <type_traits>
 #include <vector>
 
@@ -14,7 +14,7 @@ using namespace Halide::Runtime;
 // E.g. ary[2][3][4] returns (4, 3, 2).
 
 template<typename T>
-vector<int> dimension_sizes(T const &, vector<int> sizes = vector<int>()) {
+vector<int> dimension_sizes(T const &, vector<int> sizes = vector<int>() ) {
     return sizes;
 }
 
@@ -30,12 +30,12 @@ vector<int> dimension_sizes(Array (&vals)[N], vector<int> sizes = vector<int>())
 // Array has.
 
 template<typename T>
-T const *first_of_array(T const &val) {
+T const * first_of_array(T const &val) {
     return &val;
 }
 
 template<typename Array, size_t N>
-typename remove_all_extents<Array>::type const *first_of_array(Array (&vals)[N]) {
+typename remove_all_extents<Array>::type const * first_of_array(Array (&vals)[N]) {
     return first_of_array(vals[0]);
 }
 
@@ -61,7 +61,7 @@ void compare_vectors(vector<int> const &under_test, vector<int> const &reference
     cout << " instead of ";
     print_vector(reference);
     cout << "\n";
-    exit(1);
+    exit(-1);
 }
 
 void verify_dimension_sizes() {
@@ -72,15 +72,9 @@ void verify_dimension_sizes() {
 
     vector<int> v1(1), v2(2), v3(3), v4(4);
     v1[0] = 2;
-    v2[0] = 3;
-    v2[1] = 4;
-    v3[0] = 5;
-    v3[1] = 6;
-    v3[2] = 7;
-    v4[0] = 8;
-    v4[1] = 9;
-    v4[2] = 10;
-    v4[3] = 11;
+    v2[0] = 3; v2[1] = 4;
+    v3[0] = 5; v3[1] = 6; v3[2] = 7;
+    v4[0] = 8; v4[1] = 9; v4[2] = 10; v4[3] = 11;
 
     compare_vectors(dimension_sizes(a1), v1);
     compare_vectors(dimension_sizes(a2), v2);
@@ -94,7 +88,7 @@ void compare_extents(const Image &img, int reference, int dimension) {
         return;
     cout << "Extent of dimension " << dimension << " of " << img.dimensions()
          << " is " << img.dim(dimension).extent() << " instead of " << reference << "\n";
-    exit(1);
+    exit(-1);
 }
 
 template<typename Array, typename T = typename remove_all_extents<Array>::type>
@@ -102,15 +96,17 @@ void verify_image_construction_from_array(Array &vals) {
     Buffer<T> img(vals);
     vector<int> sizes(dimension_sizes(vals));
     int dims = (int)sizes.size();
+    int n = 1;
     for (int i = 0; i < dims; ++i) {
         compare_extents(img, sizes[i], i);
+        n *= sizes[i];
     }
     const void *reference = (const void *)first_of_array(vals);
     const void *under_test = (const void *)(&img());
     if (reference != under_test) {
         cerr << "Start of array: " << reference
              << "Start of image: " << under_test << "\n";
-        exit(1);
+        exit(-1);
     }
 }
 
@@ -129,7 +125,8 @@ void test() {
 
 //-----------------------------------------------------------------------------
 
-int main() {
+int main()
+{
     // Verify dimension_sizes() works as intended.
     verify_dimension_sizes();
 

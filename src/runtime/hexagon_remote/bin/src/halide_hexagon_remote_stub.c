@@ -4,8 +4,6 @@
 #ifndef _QAIC_ENV_H
 #define _QAIC_ENV_H
 
-#include <stdio.h>
-
 #ifdef __GNUC__
 #ifdef __clang__
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
@@ -144,16 +142,15 @@ static __inline void _qaic_memmove(void* dst, void* src, int size) {
 #define _ASSERT(nErr, ff) _TRY(nErr, 0 == (ff) ? AEE_EBADPARM : AEE_SUCCESS)
 
 #ifdef __QAIC_DEBUG__
-#define _ALLOCATE(nErr, pal, size, alignment, pv) _TRY(nErr, _allocator_alloc(pal, __FILE_LINE__, size, alignment, (void**)&pv));\
-                                                  _ASSERT(nErr,pv || !(size))
+#define _ALLOCATE(nErr, pal, size, alignment, pv) _TRY(nErr, _allocator_alloc(pal, __FILE_LINE__, size, alignment, (void**)&pv))
 #else
-#define _ALLOCATE(nErr, pal, size, alignment, pv) _TRY(nErr, _allocator_alloc(pal, 0, size, alignment, (void**)&pv));\
-                                                  _ASSERT(nErr,pv || !(size))
+#define _ALLOCATE(nErr, pal, size, alignment, pv) _TRY(nErr, _allocator_alloc(pal, 0, size, alignment, (void**)&pv))
 #endif
 
 
 #endif // _QAIC_ENV_H
 
+#include "remote.h"
 #ifndef _ALLOCATOR_H
 #define _ALLOCATOR_H
 
@@ -411,6 +408,7 @@ struct Interface {
 
 #ifndef _HALIDE_HEXAGON_REMOTE_SLIM_H
 #define _HALIDE_HEXAGON_REMOTE_SLIM_H
+#include "remote.h"
 #include <stdint.h>
 
 #ifndef __QAIC_SLIM
@@ -420,17 +418,17 @@ struct Interface {
 #define __QAIC_SLIM_EXPORT
 #endif
 
-static const Type types[4];
-static const SequenceType sequenceTypes[1] = {{&(types[2]),0x0,0x4,0x4,0x0}};
-static const Type types[4] = {{0x1,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x1},{0x1,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x1},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[1]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8)},{0x8,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x8}};
-static const Parameter parameters[11] = {{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[0]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[1]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),0,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,3,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(sequenceTypes[0]),0}}, 25,SLIM_IFPTR32(0x4,0x8),0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(sequenceTypes[0]),0}}, 25,SLIM_IFPTR32(0x4,0x8),3,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[3]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[0]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),3,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,3,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,0,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,0,0}};
-static const Parameter* const parameterArrays[23] = {(&(parameters[9])),(&(parameters[10])),(&(parameters[10])),(&(parameters[9])),(&(parameters[10])),(&(parameters[10])),(&(parameters[9])),(&(parameters[9])),(&(parameters[3])),(&(parameters[3])),(&(parameters[4])),(&(parameters[5])),(&(parameters[6])),(&(parameters[3])),(&(parameters[0])),(&(parameters[2])),(&(parameters[0])),(&(parameters[1])),(&(parameters[2])),(&(parameters[8])),(&(parameters[8])),(&(parameters[7])),(&(parameters[8]))};
-static const Method methods[9] = {{REMOTE_SCALARS_MAKEX(0,0,0x3,0x1,0x0,0x0),0x8,0x4,5,3,(&(parameterArrays[16])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x2,0x1,0x0,0x0),0x8,0x4,4,3,(&(parameterArrays[13])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x0,0x0,0x0,0x0),0x0,0x0,0,0,0,0x0,0x0},{REMOTE_SCALARS_MAKEX(0,0,255,255,15,15),0x14,0x0,9,5,(&(parameterArrays[8])),0x4,0x1},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x4,0x0,1,1,(&(parameterArrays[8])),0x4,0x0},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x2,0x0,0x0),0x4,0x4,4,2,(&(parameterArrays[21])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x0,0x1,0x0,0x0),0x0,0x8,2,2,(&(parameterArrays[19])),0x1,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x4,0x0,1,1,(&(parameterArrays[0])),0x4,0x0},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x20,0x0,8,8,(&(parameterArrays[0])),0x4,0x0}};
-static const Method* const methodArrays[12] = {&(methods[0]),&(methods[1]),&(methods[2]),&(methods[2]),&(methods[3]),&(methods[4]),&(methods[5]),&(methods[6]),&(methods[7]),&(methods[7]),&(methods[8]),&(methods[7])};
-static const char strings[378] = "profiler_set_current_func\0busbwUsagePercentage\0set_performance_mode\0set_thread_priority\0poll_profiler_state\0bwMegabytesPerSec\0set_performance\0release_library\0output_buffers\0mipsPerThread\0input_buffers\0power_hvx_off\0get_symbol_v4\0power_hvx_on\0load_library\0set_latency\0set_bus_bw\0module_ptr\0mipsTotal\0read_size\0set_mips\0poll_log\0threads\0scalars\0sym_ptr\0symbol\0run_v2\0soname\0code\0";
-static const uint16_t methodStrings[39] = {126,309,173,289,267,108,26,255,259,358,278,351,187,158,335,215,278,367,343,242,365,372,278,88,21,327,318,323,299,68,79,47,63,0,13,142,278,201,229};
-static const uint16_t methodStringsArrays[12] = {19,15,38,37,9,35,26,23,33,31,0,29};
-__QAIC_SLIM_EXPORT const Interface __QAIC_SLIM(halide_hexagon_remote_slim) = {12,&(methodArrays[0]),0,0,&(methodStringsArrays [0]),methodStrings,strings};
+static const Type types[2];
+static const SequenceType sequenceTypes[1] = {{&(types[1]),0x0,0x4,0x4,0x0}};
+static const Type types[2] = {{0x1,{{(const uintptr_t)0,(const uintptr_t)0}}, 2,0x1},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[0]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8)}};
+static const Parameter parameters[8] = {{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[0]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),0,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,0,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)0}}, 2,0x4,3,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)0}}, 2,0x4,0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(sequenceTypes[0]),0}}, 25,SLIM_IFPTR32(0x4,0x8),0,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(sequenceTypes[0]),0}}, 25,SLIM_IFPTR32(0x4,0x8),3,0},{SLIM_IFPTR32(0x8,0x10),{{(const uintptr_t)&(types[0]),(const uintptr_t)0x0}}, 9,SLIM_IFPTR32(0x4,0x8),3,0},{0x4,{{(const uintptr_t)0,(const uintptr_t)1}}, 2,0x4,3,0}};
+static const Parameter* const parameterArrays[21] = {(&(parameters[1])),(&(parameters[3])),(&(parameters[3])),(&(parameters[1])),(&(parameters[3])),(&(parameters[3])),(&(parameters[1])),(&(parameters[1])),(&(parameters[3])),(&(parameters[3])),(&(parameters[4])),(&(parameters[5])),(&(parameters[4])),(&(parameters[3])),(&(parameters[0])),(&(parameters[1])),(&(parameters[2])),(&(parameters[7])),(&(parameters[7])),(&(parameters[6])),(&(parameters[7]))};
+static const Method methods[9] = {{REMOTE_SCALARS_MAKEX(0,0,0x2,0x1,0x0,0x0),0x8,0x4,4,3,(&(parameterArrays[14])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x2,0x1,0x0,0x0),0xc,0x4,5,4,(&(parameterArrays[13])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x0,0x0,0x0,0x0),0x0,0x0,0,0,0,0x0,0x0},{REMOTE_SCALARS_MAKEX(0,0,255,255,15,15),0x14,0x0,9,5,(&(parameterArrays[8])),0x4,0x1},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x8,0x0,2,2,(&(parameterArrays[2])),0x4,0x0},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x2,0x0,0x0),0x4,0x4,4,2,(&(parameterArrays[19])),0x4,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x0,0x1,0x0,0x0),0x0,0x8,2,2,(&(parameterArrays[17])),0x1,0x4},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x4,0x0,1,1,(&(parameterArrays[0])),0x4,0x0},{REMOTE_SCALARS_MAKEX(0,0,0x1,0x0,0x0,0x0),0x20,0x0,8,8,(&(parameterArrays[0])),0x4,0x0}};
+static const Method* const methodArrays[10] = {&(methods[0]),&(methods[1]),&(methods[2]),&(methods[2]),&(methods[3]),&(methods[4]),&(methods[5]),&(methods[6]),&(methods[7]),&(methods[8])};
+static const char strings[364] = "initialize_kernels_v2\0busbwUsagePercentage\0set_performance_mode\0poll_profiler_state\0bwMegabytesPerSec\0use_shared_object\0set_performance\0release_kernels\0output_buffers\0mipsPerThread\0input_scalars\0input_buffers\0power_hvx_off\0get_symbol_v3\0power_hvx_on\0set_latency\0set_bus_bw\0module_ptr\0mipsTotal\0read_size\0set_mips\0poll_log\0threads\0sym_ptr\0symbol\0func\0name\0code\0run\0";
+static const uint16_t methodStrings[37] = {120,304,167,284,262,84,22,250,254,360,273,338,195,152,181,223,273,350,102,330,0,355,102,273,64,345,322,313,318,294,136,273,299,43,59,209,237};
+static const uint16_t methodStringsArrays[10] = {20,15,36,35,9,30,27,24,33,0};
+__QAIC_SLIM_EXPORT const Interface __QAIC_SLIM(halide_hexagon_remote_slim) = {10,&(methodArrays[0]),0,0,&(methodStringsArrays [0]),methodStrings,strings};
 #endif //_HALIDE_HEXAGON_REMOTE_SLIM_H
 #ifdef __cplusplus
 extern "C" {
@@ -484,11 +482,7 @@ __QAIC_STUB_EXPORT remote_handle _halide_hexagon_remote_handle(void) {
 uint32_t _halide_hexagon_remote_atomic_CompareAndExchange(uint32_t * volatile puDest, uint32_t uExchange, uint32_t uCompare);
 
 #ifdef _WIN32
-#ifdef _USRDLL
 #include "Windows.h"
-#else
-#include "ntddk.h"
-#endif //_USRDLL
 uint32_t _halide_hexagon_remote_atomic_CompareAndExchange(uint32_t * volatile puDest, uint32_t uExchange, uint32_t uCompare) {
    return (uint32_t)InterlockedCompareExchange((volatile LONG*)puDest, (LONG)uExchange, (LONG)uCompare);
 }
@@ -518,6 +512,10 @@ __QAIC_STUB_EXPORT remote_handle _halide_hexagon_remote_handle(void) {
 
 #endif //__qdsp6__
 
+__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_skel_invoke)(uint32_t _sc, remote_arg* _pra) __QAIC_STUB_ATTRIBUTE {
+   return __QAIC_REMOTE(remote_handle_invoke)(_halide_hexagon_remote_handle(), _sc, _pra);
+}
+
 #ifdef __cplusplus
 }
 #endif
@@ -526,41 +524,7 @@ __QAIC_STUB_EXPORT remote_handle _halide_hexagon_remote_handle(void) {
 #ifdef __cplusplus
 extern "C" {
 #endif
-extern int remote_register_dma_handle(int, uint32_t);
-static __inline int _stub_method(remote_handle _handle, uint32_t _mid, char* _in0[1], uint32_t _in0Len[1], char* _in1[1], uint32_t _in1Len[1], uint32_t _rout2[1]) {
-   int _numIn[1];
-   remote_arg _pra[4];
-   uint32_t _primIn[2];
-   uint32_t _primROut[1];
-   remote_arg* _praIn;
-   int _nErr = 0;
-   _numIn[0] = 2;
-   _pra[0].buf.pv = (void*)_primIn;
-   _pra[0].buf.nLen = sizeof(_primIn);
-   _pra[(_numIn[0] + 1)].buf.pv = (void*)_primROut;
-   _pra[(_numIn[0] + 1)].buf.nLen = sizeof(_primROut);
-   _COPY(_primIn, 0, _in0Len, 0, 4);
-   _praIn = (_pra + 1);
-   _praIn[0].buf.pv = (void*) _in0[0];
-   _praIn[0].buf.nLen = (1 * _in0Len[0]);
-   _COPY(_primIn, 4, _in1Len, 0, 4);
-   _praIn[1].buf.pv = (void*) _in1[0];
-   _praIn[1].buf.nLen = (1 * _in1Len[0]);
-   _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, 3, 1, 0, 0), _pra));
-   _COPY(_rout2, 0, _primROut, 0, 4);
-   _CATCH(_nErr) {}
-   return _nErr;
-}
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_load_library)(const char* soname, int sonameLen, const unsigned char* code, int codeLen, halide_hexagon_remote_handle_t* module_ptr) __QAIC_STUB_ATTRIBUTE {
-   uint32_t _mid = 0;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method(_handle, _mid, (char**)&soname, (uint32_t*)&sonameLen, (char**)&code, (uint32_t*)&codeLen, (uint32_t*)module_ptr);
-   else {
-   return AEE_EBADHANDLE;
-    }
-}
-static __inline int _stub_method_1(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], char* _in1[1], uint32_t _in1Len[1], uint32_t _rout2[1]) {
+static __inline int _stub_method(remote_handle _handle, uint32_t _mid, char* _in0[1], uint32_t _in0Len[1], uint32_t _in1[1], uint32_t _rout2[1]) {
    int _numIn[1];
    remote_arg _pra[3];
    uint32_t _primIn[2];
@@ -572,24 +536,46 @@ static __inline int _stub_method_1(remote_handle _handle, uint32_t _mid, uint32_
    _pra[0].buf.nLen = sizeof(_primIn);
    _pra[(_numIn[0] + 1)].buf.pv = (void*)_primROut;
    _pra[(_numIn[0] + 1)].buf.nLen = sizeof(_primROut);
-   _COPY(_primIn, 0, _in0, 0, 4);
-   _COPY(_primIn, 4, _in1Len, 0, 4);
+   _COPY(_primIn, 0, _in0Len, 0, 4);
    _praIn = (_pra + 1);
-   _praIn[0].buf.pv = (void*) _in1[0];
-   _praIn[0].buf.nLen = (1 * _in1Len[0]);
+   _praIn[0].buf.pv = _in0[0];
+   _praIn[0].buf.nLen = (1 * _in0Len[0]);
+   _COPY(_primIn, 4, _in1, 0, 4);
    _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, 2, 1, 0, 0), _pra));
    _COPY(_rout2, 0, _primROut, 0, 4);
    _CATCH(_nErr) {}
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_get_symbol_v4)(halide_hexagon_remote_handle_t module_ptr, const char* name, int nameLen, halide_hexagon_remote_handle_t* sym_ptr) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_initialize_kernels_v2)(const unsigned char* code, int codeLen, int use_shared_object, halide_hexagon_remote_handle_t* module_ptr) __QAIC_STUB_ATTRIBUTE {
+   uint32_t _mid = 0;
+   return _stub_method(_halide_hexagon_remote_handle(), _mid, (char**)&code, (uint32_t*)&codeLen, (uint32_t*)&use_shared_object, (uint32_t*)module_ptr);
+}
+static __inline int _stub_method_1(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], char* _in1[1], uint32_t _in1Len[1], uint32_t _in2[1], uint32_t _rout3[1]) {
+   int _numIn[1];
+   remote_arg _pra[3];
+   uint32_t _primIn[3];
+   uint32_t _primROut[1];
+   remote_arg* _praIn;
+   int _nErr = 0;
+   _numIn[0] = 1;
+   _pra[0].buf.pv = (void*)_primIn;
+   _pra[0].buf.nLen = sizeof(_primIn);
+   _pra[(_numIn[0] + 1)].buf.pv = (void*)_primROut;
+   _pra[(_numIn[0] + 1)].buf.nLen = sizeof(_primROut);
+   _COPY(_primIn, 0, _in0, 0, 4);
+   _COPY(_primIn, 4, _in1Len, 0, 4);
+   _praIn = (_pra + 1);
+   _praIn[0].buf.pv = _in1[0];
+   _praIn[0].buf.nLen = (1 * _in1Len[0]);
+   _COPY(_primIn, 8, _in2, 0, 4);
+   _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, 2, 1, 0, 0), _pra));
+   _COPY(_rout3, 0, _primROut, 0, 4);
+   _CATCH(_nErr) {}
+   return _nErr;
+}
+__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_get_symbol_v3)(halide_hexagon_remote_handle_t module_ptr, const char* name, int nameLen, int use_shared_object, halide_hexagon_remote_handle_t* sym_ptr) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 1;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_1(_handle, _mid, (uint32_t*)&module_ptr, (char**)&name, (uint32_t*)&nameLen, (uint32_t*)sym_ptr);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_1(_halide_hexagon_remote_handle(), _mid, (uint32_t*)&module_ptr, (char**)&name, (uint32_t*)&nameLen, (uint32_t*)&use_shared_object, (uint32_t*)sym_ptr);
 }
 static __inline int _stub_method_2(remote_handle _handle, uint32_t _mid) {
    remote_arg* _pra = 0;
@@ -600,31 +586,13 @@ static __inline int _stub_method_2(remote_handle _handle, uint32_t _mid) {
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_power_hvx_on)(void) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 2;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_2(_handle, _mid);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_2(_halide_hexagon_remote_handle(), _mid);
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_power_hvx_off)(void) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 3;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_2(_handle, _mid);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_2(_halide_hexagon_remote_handle(), _mid);
 }
-static __inline int _stub_unpack(remote_arg* _praROutPost, remote_arg* _ppraROutPost[1], void* _primROut, char* _rout0[1], uint32_t _rout0Len[1]) {
-   int _nErr = 0;
-   remote_arg* _praROutPostStart = _praROutPost;
-   remote_arg** _ppraROutPostStart = _ppraROutPost;
-   _ppraROutPost = &_praROutPost;
-   _ppraROutPostStart[0] += (_praROutPost - _praROutPostStart) +1;
-   return _nErr;
-}
-static __inline int _stub_unpack_1(remote_arg* _praROutPost, remote_arg* _ppraROutPost[1], void* _primROut, char* _in0[1], uint32_t _in0Len[1]) {
+static __inline int _stub_unpack(remote_arg* _praROutPost, remote_arg* _ppraROutPost[1], void* _primROut, char* _in0[1], uint32_t _in0Len[1]) {
    int _nErr = 0;
    remote_arg* _praROutPostStart = _praROutPost;
    remote_arg** _ppraROutPostStart = _ppraROutPost;
@@ -632,7 +600,30 @@ static __inline int _stub_unpack_1(remote_arg* _praROutPost, remote_arg* _ppraRO
    _ppraROutPostStart[0] += (_praROutPost - _praROutPostStart) +0;
    return _nErr;
 }
-static __inline int _stub_pack(_allocator* _al, remote_arg* _praIn, remote_arg* _ppraIn[1], remote_arg* _praROut, remote_arg* _ppraROut[1], remote_arg* _praHIn, remote_arg* _ppraHIn[1], remote_arg* _praHROut, remote_arg* _ppraHROut[1], void* _primIn, void* _primROut, char* _rout0[1], uint32_t _rout0Len[1]) {
+static __inline int _stub_unpack_1(remote_arg* _praROutPost, remote_arg* _ppraROutPost[1], void* _primROut, char* _rout0[1], uint32_t _rout0Len[1]) {
+   int _nErr = 0;
+   remote_arg* _praROutPostStart = _praROutPost;
+   remote_arg** _ppraROutPostStart = _ppraROutPost;
+   _ppraROutPost = &_praROutPost;
+   _ppraROutPostStart[0] += (_praROutPost - _praROutPostStart) +1;
+   return _nErr;
+}
+static __inline int _stub_pack(_allocator* _al, remote_arg* _praIn, remote_arg* _ppraIn[1], remote_arg* _praROut, remote_arg* _ppraROut[1], void* _primIn, void* _primROut, char* _in0[1], uint32_t _in0Len[1]) {
+   int _nErr = 0;
+   remote_arg* _praInStart = _praIn;
+   remote_arg** _ppraInStart = _ppraIn;
+   remote_arg* _praROutStart = _praROut;
+   remote_arg** _ppraROutStart = _ppraROut;
+   _ppraIn = &_praIn;
+   _ppraROut = &_praROut;
+   _COPY(_primIn, 0, _in0Len, 0, 4);
+   _praIn[0].buf.pv = _in0[0];
+   _praIn[0].buf.nLen = (1 * _in0Len[0]);
+   _ppraInStart[0] += (_praIn - _praInStart) + 1;
+   _ppraROutStart[0] += (_praROut - _praROutStart) +0;
+   return _nErr;
+}
+static __inline int _stub_pack_1(_allocator* _al, remote_arg* _praIn, remote_arg* _ppraIn[1], remote_arg* _praROut, remote_arg* _ppraROut[1], void* _primIn, void* _primROut, char* _rout0[1], uint32_t _rout0Len[1]) {
    int _nErr = 0;
    remote_arg* _praInStart = _praIn;
    remote_arg** _ppraInStart = _ppraIn;
@@ -647,42 +638,22 @@ static __inline int _stub_pack(_allocator* _al, remote_arg* _praIn, remote_arg* 
    _ppraROutStart[0] += (_praROut - _praROutStart) +1;
    return _nErr;
 }
-static __inline int _stub_pack_1(_allocator* _al, remote_arg* _praIn, remote_arg* _ppraIn[1], remote_arg* _praROut, remote_arg* _ppraROut[1], remote_arg* _praHIn, remote_arg* _ppraHIn[1], remote_arg* _praHROut, remote_arg* _ppraHROut[1], void* _primIn, void* _primROut, char* _in0[1], uint32_t _in0Len[1]) {
-   int _nErr = 0;
-   remote_arg* _praInStart = _praIn;
-   remote_arg** _ppraInStart = _ppraIn;
-   remote_arg* _praROutStart = _praROut;
-   remote_arg** _ppraROutStart = _ppraROut;
-   _ppraIn = &_praIn;
-   _ppraROut = &_praROut;
-   _COPY(_primIn, 0, _in0Len, 0, 4);
-   _praIn[0].buf.pv = (void*) _in0[0];
-   _praIn[0].buf.nLen = (1 * _in0Len[0]);
-   _ppraInStart[0] += (_praIn - _praInStart) + 1;
-   _ppraROutStart[0] += (_praROut - _praROutStart) +0;
-   return _nErr;
-}
-static __inline void _count(int _numIn[1], int _numROut[1], int _numInH[1], int _numROutH[1], char* _rout0[1], uint32_t _rout0Len[1]) {
-   _numIn[0] += 0;
-   _numROut[0] += 1;
-   _numInH[0] += 0;
-   _numROutH[0] += 0;
-}
-static __inline void _count_1(int _numIn[1], int _numROut[1], int _numInH[1], int _numROutH[1], char* _in0[1], uint32_t _in0Len[1]) {
+static __inline void _count(int _numIn[1], int _numROut[1], char* _in0[1], uint32_t _in0Len[1]) {
    _numIn[0] += 1;
    _numROut[0] += 0;
-   _numInH[0] += 0;
-   _numROutH[0] += 0;
 }
-static __inline int _stub_method_3(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], uint32_t _in1[1], void* _in2[1], uint32_t _in2Len[1], void* _rout3[1], uint32_t _rout3Len[1], char* _in4[1], uint32_t _in4Len[1]) {
+static __inline void _count_1(int _numIn[1], int _numROut[1], char* _rout0[1], uint32_t _rout0Len[1]) {
+   _numIn[0] += 0;
+   _numROut[0] += 1;
+}
+static __inline int _stub_method_3(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], uint32_t _in1[1], void* _in2[1], uint32_t _in2Len[1], void* _rout3[1], uint32_t _rout3Len[1], void* _in4[1], uint32_t _in4Len[1]) {
    remote_arg* _pra;
    int _numIn[1];
    int _numROut[1];
-   int _numInH[1];
-   int _numROutH[1];
    char* _seq_nat2;
    int _ii;
    char* _seq_nat3;
+   char* _seq_nat4;
    _allocator _al[1] = {{0}};
    uint32_t _primIn[5];
    remote_arg* _praIn;
@@ -691,32 +662,26 @@ static __inline int _stub_method_3(remote_handle _handle, uint32_t _mid, uint32_
    remote_arg** _ppraROutPost = &_praROutPost;
    remote_arg** _ppraIn = &_praIn;
    remote_arg** _ppraROut = &_praROut;
-   remote_arg* _praHIn = 0;
-   remote_arg** _ppraHIn = &_praHIn;
-   remote_arg* _praHROut = 0;
-   remote_arg** _ppraHROut = &_praHROut;
    char* _seq_primIn2;
    int _nErr = 0;
    char* _seq_primIn3;
+   char* _seq_primIn4;
    _numIn[0] = 3;
    _numROut[0] = 0;
-   _numInH[0] = 0;
-   _numROutH[0] = 0;
    for(_ii = 0, _seq_nat2 = (char*)_in2[0];_ii < (int)_in2Len[0];++_ii, _seq_nat2 = (_seq_nat2 + SLIM_IFPTR32(8, 16)))
    {
-      _count_1(_numIn, _numROut, _numInH, _numROutH, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2])));
+      _count(_numIn, _numROut, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2])));
    }
    for(_ii = 0, _seq_nat3 = (char*)_rout3[0];_ii < (int)_rout3Len[0];++_ii, _seq_nat3 = (_seq_nat3 + SLIM_IFPTR32(8, 16)))
    {
-      _count(_numIn, _numROut, _numInH, _numROutH, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2])));
+      _count_1(_numIn, _numROut, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2])));
    }
-   if(_numIn[0]>=255)
-      printf("ERROR: Unsupported number of input buffers\n");
-   if(_numROut[0]>=255)
-      printf("ERROR: Unsupported number of output buffers\n");
+   for(_ii = 0, _seq_nat4 = (char*)_in4[0];_ii < (int)_in4Len[0];++_ii, _seq_nat4 = (_seq_nat4 + SLIM_IFPTR32(8, 16)))
+   {
+      _count(_numIn, _numROut, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat4)[0]), (char**)&(((uint64_t*)_seq_nat4)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat4)[1]), (uint32_t*)&(((uint32_t*)_seq_nat4)[2])));
+   }
    _allocator_init(_al, 0, 0);
-   _ALLOCATE(_nErr, _al, ((((((((_numIn[0] + _numROut[0]) + _numInH[0]) + _numROutH[0]) + 1) + 0) + 0) + 0) * sizeof(_pra[0])), 4, _pra);
-   _ASSERT(_nErr, _pra);
+   _ALLOCATE(_nErr, _al, ((((_numIn[0] + _numROut[0]) + 1) + 0) * sizeof(_pra[0])), 4, _pra);
    _pra[0].buf.pv = (void*)_primIn;
    _pra[0].buf.nLen = sizeof(_primIn);
    _praIn = (_pra + 1);
@@ -725,71 +690,62 @@ static __inline int _stub_method_3(remote_handle _handle, uint32_t _mid, uint32_
    _COPY(_primIn, 0, _in0, 0, 4);
    _COPY(_primIn, 4, _in1, 0, 4);
    _COPY(_primIn, 8, _in2Len, 0, 4);
-   if(_praHIn == 0)
-   {
-      _praHIn = ((_praROut + _numROut[0]) + 0);
-   }
-   if(_praHROut == 0)
-      (_praHROut = _praHIn + _numInH[0] + 0);
    _ALLOCATE(_nErr, _al, (_in2Len[0] * 4), 4, _praIn[0].buf.pv);
    _praIn[0].buf.nLen = (4 * _in2Len[0]);
    for(_ii = 0, _seq_primIn2 = (char*)_praIn[0].buf.pv, _seq_nat2 = (char*)_in2[0];_ii < (int)_in2Len[0];++_ii, _seq_primIn2 = (_seq_primIn2 + 4), _seq_nat2 = (_seq_nat2 + SLIM_IFPTR32(8, 16)))
    {
-      _TRY(_nErr, _stub_pack_1(_al, (_praIn + 1), _ppraIn, (_praROut + 0), _ppraROut, _praHIn, _ppraHIn, _praHROut, _ppraHROut, _seq_primIn2, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2]))));
+      _TRY(_nErr, _stub_pack(_al, (_praIn + 1), _ppraIn, (_praROut + 0), _ppraROut, _seq_primIn2, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2]))));
    }
    _COPY(_primIn, 12, _rout3Len, 0, 4);
    _ALLOCATE(_nErr, _al, (_rout3Len[0] * 4), 4, _praIn[1].buf.pv);
    _praIn[1].buf.nLen = (4 * _rout3Len[0]);
    for(_ii = 0, _seq_primIn3 = (char*)_praIn[1].buf.pv, _seq_nat3 = (char*)_rout3[0];_ii < (int)_rout3Len[0];++_ii, _seq_primIn3 = (_seq_primIn3 + 4), _seq_nat3 = (_seq_nat3 + SLIM_IFPTR32(8, 16)))
    {
-      _TRY(_nErr, _stub_pack(_al, (_praIn + 2), _ppraIn, (_praROut + 0), _ppraROut, _praHIn, _ppraHIn, _praHROut, _ppraHROut, _seq_primIn3, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2]))));
+      _TRY(_nErr, _stub_pack_1(_al, (_praIn + 2), _ppraIn, (_praROut + 0), _ppraROut, _seq_primIn3, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2]))));
    }
    _COPY(_primIn, 16, _in4Len, 0, 4);
-   _praIn[2].buf.pv = (void*) _in4[0];
-   _praIn[2].buf.nLen = (8 * _in4Len[0]);
-   _ASSERT(_nErr, (_numInH[0] + 0) <= 15);
-   _ASSERT(_nErr, (_numROutH[0] + 0) <= 15);
-   _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, (_numIn[0] + 1), (_numROut[0] + 0), (_numInH[0] + 0), (_numROutH[0] + 0)), _pra));
+   _ALLOCATE(_nErr, _al, (_in4Len[0] * 4), 4, _praIn[2].buf.pv);
+   _praIn[2].buf.nLen = (4 * _in4Len[0]);
+   for(_ii = 0, _seq_primIn4 = (char*)_praIn[2].buf.pv, _seq_nat4 = (char*)_in4[0];_ii < (int)_in4Len[0];++_ii, _seq_primIn4 = (_seq_primIn4 + 4), _seq_nat4 = (_seq_nat4 + SLIM_IFPTR32(8, 16)))
+   {
+      _TRY(_nErr, _stub_pack(_al, (_praIn + 3), _ppraIn, (_praROut + 0), _ppraROut, _seq_primIn4, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat4)[0]), (char**)&(((uint64_t*)_seq_nat4)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat4)[1]), (uint32_t*)&(((uint32_t*)_seq_nat4)[2]))));
+   }
+   _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, (_numIn[0] + 1), (_numROut[0] + 0), 0, 0), _pra));
    for(_ii = 0, _seq_nat2 = (char*)_in2[0];_ii < (int)_in2Len[0];++_ii, _seq_nat2 = (_seq_nat2 + SLIM_IFPTR32(8, 16)))
    {
-      _TRY(_nErr, _stub_unpack_1((_praROutPost + 0), _ppraROutPost, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2]))));
+      _TRY(_nErr, _stub_unpack((_praROutPost + 0), _ppraROutPost, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat2)[0]), (char**)&(((uint64_t*)_seq_nat2)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat2)[1]), (uint32_t*)&(((uint32_t*)_seq_nat2)[2]))));
    }
    for(_ii = 0, _seq_nat3 = (char*)_rout3[0];_ii < (int)_rout3Len[0];++_ii, _seq_nat3 = (_seq_nat3 + SLIM_IFPTR32(8, 16)))
    {
-      _TRY(_nErr, _stub_unpack((_praROutPost + 0), _ppraROutPost, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2]))));
+      _TRY(_nErr, _stub_unpack_1((_praROutPost + 0), _ppraROutPost, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat3)[0]), (char**)&(((uint64_t*)_seq_nat3)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat3)[1]), (uint32_t*)&(((uint32_t*)_seq_nat3)[2]))));
+   }
+   for(_ii = 0, _seq_nat4 = (char*)_in4[0];_ii < (int)_in4Len[0];++_ii, _seq_nat4 = (_seq_nat4 + SLIM_IFPTR32(8, 16)))
+   {
+      _TRY(_nErr, _stub_unpack((_praROutPost + 0), _ppraROutPost, 0, SLIM_IFPTR32((char**)&(((uint32_t*)_seq_nat4)[0]), (char**)&(((uint64_t*)_seq_nat4)[0])), SLIM_IFPTR32((uint32_t*)&(((uint32_t*)_seq_nat4)[1]), (uint32_t*)&(((uint32_t*)_seq_nat4)[2]))));
    }
    _CATCH(_nErr) {}
    _allocator_deinit(_al);
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_run_v2)(halide_hexagon_remote_handle_t module_ptr, halide_hexagon_remote_handle_t symbol, const halide_hexagon_remote_buffer* input_buffers, int input_buffersLen, halide_hexagon_remote_buffer* output_buffers, int output_buffersLen, const halide_hexagon_remote_scalar_t* scalars, int scalarsLen) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_run)(halide_hexagon_remote_handle_t module_ptr, halide_hexagon_remote_handle_t symbol, const halide_hexagon_remote_buffer* input_buffers, int input_buffersLen, halide_hexagon_remote_buffer* output_buffers, int output_buffersLen, const halide_hexagon_remote_buffer* input_scalars, int input_scalarsLen) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 4;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_3(_handle, _mid, (uint32_t*)&module_ptr, (uint32_t*)&symbol, (void**)&input_buffers, (uint32_t*)&input_buffersLen, (void**)&output_buffers, (uint32_t*)&output_buffersLen, (char**)&scalars, (uint32_t*)&scalarsLen);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_3(_halide_hexagon_remote_handle(), _mid, (uint32_t*)&module_ptr, (uint32_t*)&symbol, (void**)&input_buffers, (uint32_t*)&input_buffersLen, (void**)&output_buffers, (uint32_t*)&output_buffersLen, (void**)&input_scalars, (uint32_t*)&input_scalarsLen);
 }
-static __inline int _stub_method_4(remote_handle _handle, uint32_t _mid, uint32_t _in0[1]) {
+static __inline int _stub_method_4(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], uint32_t _in1[1]) {
    remote_arg _pra[1];
-   uint32_t _primIn[1];
+   uint32_t _primIn[2];
    int _nErr = 0;
    _pra[0].buf.pv = (void*)_primIn;
    _pra[0].buf.nLen = sizeof(_primIn);
    _COPY(_primIn, 0, _in0, 0, 4);
+   _COPY(_primIn, 4, _in1, 0, 4);
    _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, 1, 0, 0, 0), _pra));
    _CATCH(_nErr) {}
    return _nErr;
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_release_library)(halide_hexagon_remote_handle_t module_ptr) __QAIC_STUB_ATTRIBUTE {
+__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_release_kernels)(halide_hexagon_remote_handle_t module_ptr, int size) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 5;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_4(_handle, _mid, (uint32_t*)&module_ptr);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_4(_halide_hexagon_remote_handle(), _mid, (uint32_t*)&module_ptr, (uint32_t*)&size);
 }
 static __inline int _stub_method_5(remote_handle _handle, uint32_t _mid, char* _rout0[1], uint32_t _rout0Len[1], uint32_t _rout1[1]) {
    int _numIn[1];
@@ -816,12 +772,7 @@ static __inline int _stub_method_5(remote_handle _handle, uint32_t _mid, char* _
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_poll_log)(char* log, int logLen, int* read_size) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 6;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_5(_handle, _mid, (char**)&log, (uint32_t*)&logLen, (uint32_t*)read_size);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_5(_halide_hexagon_remote_handle(), _mid, (char**)&log, (uint32_t*)&logLen, (uint32_t*)read_size);
 }
 static __inline int _stub_method_6(remote_handle _handle, uint32_t _mid, uint32_t _rout0[1], uint32_t _rout1[1]) {
    int _numIn[1];
@@ -839,32 +790,24 @@ static __inline int _stub_method_6(remote_handle _handle, uint32_t _mid, uint32_
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_poll_profiler_state)(int* func, int* threads) __QAIC_STUB_ATTRIBUTE {
    uint32_t _mid = 7;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_6(_handle, _mid, (uint32_t*)func, (uint32_t*)threads);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   return _stub_method_6(_halide_hexagon_remote_handle(), _mid, (uint32_t*)func, (uint32_t*)threads);
 }
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_profiler_set_current_func)(int current_func) __QAIC_STUB_ATTRIBUTE {
-   uint32_t _mid = 8;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_4(_handle, _mid, (uint32_t*)&current_func);
-   else {
-   return AEE_EBADHANDLE;
-    }
+static __inline int _stub_method_7(remote_handle _handle, uint32_t _mid, uint32_t _in0[1]) {
+   remote_arg _pra[1];
+   uint32_t _primIn[1];
+   int _nErr = 0;
+   _pra[0].buf.pv = (void*)_primIn;
+   _pra[0].buf.nLen = sizeof(_primIn);
+   _COPY(_primIn, 0, _in0, 0, 4);
+   _TRY(_nErr, __QAIC_REMOTE(remote_handle_invoke)(_handle, REMOTE_SCALARS_MAKEX(0, _mid, 1, 0, 0, 0), _pra));
+   _CATCH(_nErr) {}
+   return _nErr;
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_set_performance_mode)(int mode) __QAIC_STUB_ATTRIBUTE {
-   uint32_t _mid = 9;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_4(_handle, _mid, (uint32_t*)&mode);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   uint32_t _mid = 8;
+   return _stub_method_7(_halide_hexagon_remote_handle(), _mid, (uint32_t*)&mode);
 }
-static __inline int _stub_method_7(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], uint32_t _in1[1], uint32_t _in2[1], uint32_t _in3[1], uint32_t _in4[1], uint32_t _in5[1], uint32_t _in6[1], uint32_t _in7[1]) {
+static __inline int _stub_method_8(remote_handle _handle, uint32_t _mid, uint32_t _in0[1], uint32_t _in1[1], uint32_t _in2[1], uint32_t _in3[1], uint32_t _in4[1], uint32_t _in5[1], uint32_t _in6[1], uint32_t _in7[1]) {
    remote_arg _pra[1];
    uint32_t _primIn[8];
    int _nErr = 0;
@@ -883,22 +826,8 @@ static __inline int _stub_method_7(remote_handle _handle, uint32_t _mid, uint32_
    return _nErr;
 }
 __QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_set_performance)(int set_mips, unsigned int mipsPerThread, unsigned int mipsTotal, int set_bus_bw, unsigned int bwMegabytesPerSec, unsigned int busbwUsagePercentage, int set_latency, int latency) __QAIC_STUB_ATTRIBUTE {
-   uint32_t _mid = 10;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_7(_handle, _mid, (uint32_t*)&set_mips, (uint32_t*)&mipsPerThread, (uint32_t*)&mipsTotal, (uint32_t*)&set_bus_bw, (uint32_t*)&bwMegabytesPerSec, (uint32_t*)&busbwUsagePercentage, (uint32_t*)&set_latency, (uint32_t*)&latency);
-   else {
-   return AEE_EBADHANDLE;
-    }
-}
-__QAIC_STUB_EXPORT int __QAIC_STUB(halide_hexagon_remote_set_thread_priority)(int priority) __QAIC_STUB_ATTRIBUTE {
-   uint32_t _mid = 11;
-   remote_handle _handle = _halide_hexagon_remote_handle();
-   if (_handle != -1)
-   return _stub_method_4(_handle, _mid, (uint32_t*)&priority);
-   else {
-   return AEE_EBADHANDLE;
-    }
+   uint32_t _mid = 9;
+   return _stub_method_8(_halide_hexagon_remote_handle(), _mid, (uint32_t*)&set_mips, (uint32_t*)&mipsPerThread, (uint32_t*)&mipsTotal, (uint32_t*)&set_bus_bw, (uint32_t*)&bwMegabytesPerSec, (uint32_t*)&busbwUsagePercentage, (uint32_t*)&set_latency, (uint32_t*)&latency);
 }
 #ifdef __cplusplus
 }

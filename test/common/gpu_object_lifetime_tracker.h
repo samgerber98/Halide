@@ -10,55 +10,40 @@ namespace Internal {
 
 class GpuObjectLifetimeTracker {
     struct ObjectType {
-        const char *const created;
-        const char *const destroyed;
+        const char * const created;
+        const char * const destroyed;
         bool const is_global;
         int total_created;
         int live_count;
 
-        ObjectType(const char *created, const char *destroyed, bool is_global = false)
-            : created(created), destroyed(destroyed),
-              is_global(is_global), total_created(0), live_count(0) {
-        }
+        ObjectType(const char *created, const char *destroyed, bool is_global = false) :
+            created(created), destroyed(destroyed),
+            is_global(is_global), total_created(0), live_count(0) {}
     };
 
-    std::array<ObjectType, 22> object_types = {{
-        {"Caching compiled kernel:", "Releasing cached compilation:"},
-
+    std::array<ObjectType, 13> object_types = {{
         // OpenCL objects
         {"clCreateContext", "clReleaseContext", true},
         {"clCreateCommandQueue", "clReleaseCommandQueue", true},
         // This handles both "clCreateProgramWithSource" and
         // "clCreateProgramWithBinary".
+        {"clCreateProgram", "clReleaseProgram"},
         {"clCreateBuffer", "clReleaseMemObject"},
         {"clCreateKernel", "clReleaseKernel"},
 
         // CUDA objects
         {"cuCtxCreate", "cuCtxDestroy", true},
+        {"cuModuleLoad", "cuModuleUnload"},
         {"cuMemAlloc", "cuMemFree"},
 
         // Metal objects
         {"Allocating: MTLCreateSystemDefaultDevice", "Releasing: MTLCreateSystemDefaultDevice", true},
         {"Allocating: new_command_queue", "Releasing: new_command_queue"},
+        {"Allocating: new_library_with_source", "Releasing: new_library_with_source"},
 
         // Hexagon objects
-        {"halide_remote_load_library", "halide_remote_release_library"},
+        {"halide_remote_initialize_kernels", "halide_remote_release_kernels"},
         {"ion_alloc", "ion_free"},
-
-        // Vulkan objects
-        {"vk_create_context", "vk_destroy_context", true},
-        {"vk_create_command_pool", "vk_destroy_command_pool"},
-        {"vk_create_command_buffer", "vk_destroy_command_buffer"},
-        {"vk_create_pipeline_layout", "vk_destroy_pipeline_layout"},
-        {"vk_create_compute_pipeline", "vk_destroy_compute_pipeline"},
-        {"vk_create_descriptor_pool", "vk_destroy_descriptor_pool"},
-        {"Vulkan: Allocated memory for device region", "Vulkan: Deallocated memory for device region"},
-        {"Vulkan: Created buffer", "Vulkan: Destroyed buffer"},
-
-        // WebGPU objects
-        {"wgpuCreateInstance", "wgpuInstanceRelease", true},
-        {"wgpuDeviceCreateBuffer", "wgpuBufferRelease"},
-        {"wgpuDeviceCreateComputePipeline", "wgpuComputePipelineRelease"},
     }};
 
 public:
@@ -68,7 +53,8 @@ public:
             if (strstr(str, o.created)) {
                 o.total_created++;
                 o.live_count++;
-            } else if (strstr(str, o.destroyed)) {
+            }
+            else if (strstr(str, o.destroyed)) {
                 o.live_count--;
             }
         }
@@ -82,12 +68,12 @@ public:
                 !(allow_globals && o.is_global)) {
                 printf("Error! %d objects created by %s still live\n",
                        o.live_count, o.created);
-                return 1;
+                return -1;
             }
             if (o.is_global && o.total_created > max_globals) {
                 printf("Error! %d global objects created by %s, max is %d\n",
                        o.total_created, o.created, max_globals);
-                return 1;
+                return -1;
             }
 
             total += o.total_created;
@@ -95,13 +81,13 @@ public:
         if (!allow_none && total == 0) {
             printf("Error! No objects created. Ensure gpu_debug is set, ");
             printf("and record_gpu_debug is called from halide_print.\n");
-            return 1;
+            return -1;
         }
         return 0;
     }
 };
 
-}  // namespace Internal
 }  // namespace Halide
+}  // namespace Internal
 
 #endif

@@ -1,18 +1,23 @@
-#include "two_kernels_filter.h"
 #include <android/log.h>
-#include <iomanip>
-#include <iostream>
 #include <jni.h>
+#include <iostream>
+#include <iomanip>
+#include "two_kernels_filter.h"
 #include <sstream>
 
 #include "HalideBuffer.h"
 #include "HalideRuntimeOpenGLCompute.h"
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "oglc_run", __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "oglc_run", __VA_ARGS__)
+#define  LOGI(...)  __android_log_print(ANDROID_LOG_INFO, "oglc_run", __VA_ARGS__)
+#define  LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, "oglc_run", __VA_ARGS__)
+
+extern "C" int halide_copy_to_host(void *, buffer_t *);
+extern "C" int halide_device_sync(void *, buffer_t *);
+extern "C" int halide_device_free(void *, buffer_t* buf);
+extern "C" void halide_device_release(void *, const halide_device_interface_t *interface);
 
 template<typename T>
-void print(Halide::Runtime::Buffer<T, 3> buf) {
+void print(Halide::Runtime::Buffer<T> buf) {
     for (int j = 0; j < std::min(buf.height(), 10); j++) {
         std::stringstream oss;
         for (int i = 0; i < std::min(buf.width(), 10); i++) {
@@ -30,14 +35,14 @@ void print(Halide::Runtime::Buffer<T, 3> buf) {
     }
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     LOGI("\nvvvv vvvv vvvv");
 
     int width = 128;
     int height = 128;
     int channels = 4;
 
-    auto input = Halide::Runtime::Buffer<int, 3>::make_interleaved(width, height, channels);
+    auto input = Halide::Runtime::Buffer<int>::make_interleaved(width, height, channels);
     LOGI("Allocated memory for %dx%dx%d image", width, height, channels);
 
     input.for_each_element([&](int i, int j, int k) {
@@ -47,7 +52,7 @@ int main(int argc, char **argv) {
     LOGI("Input :\n");
     print(input);
 
-    auto output = Halide::Runtime::Buffer<int, 3>::make_interleaved(width, height, channels);
+    auto output = Halide::Runtime::Buffer<int>::make_interleaved(width, height, channels);
 
     two_kernels_filter(input, output);
     LOGI("Filter is done.");
@@ -75,7 +80,7 @@ int main(int argc, char **argv) {
         }
     });
 
-    LOGI(count_mismatches == 0 ? "Test passed.\n" : "Test failed.\n");
+    LOGI(count_mismatches == 0 ? "Test passed.\n": "Test failed.\n");
 
     halide_device_release(NULL, halide_openglcompute_device_interface());
 

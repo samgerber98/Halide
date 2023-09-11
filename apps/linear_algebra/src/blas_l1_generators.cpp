@@ -1,5 +1,5 @@
-#include "Halide.h"
 #include <vector>
+#include "Halide.h"
 
 using namespace Halide;
 
@@ -7,28 +7,41 @@ namespace {
 
 // Generator class for BLAS axpy operations.
 template<class T>
-class AXPYGenerator : public Generator<AXPYGenerator<T>> {
-public:
+class AXPYGenerator :
+        public Generator<AXPYGenerator<T>> {
+  public:
     typedef Generator<AXPYGenerator<T>> Base;
+    using Base::target;
     using Base::get_target;
     using Base::natural_vector_size;
-    using Base::target;
-    template<typename T2>
-    using Input = typename Base::template Input<T2>;
-    template<typename T2>
-    using Output = typename Base::template Output<T2>;
 
-    GeneratorParam<bool> vectorize_{"vectorize", true};
-    GeneratorParam<int> block_size_{"block_size", 1024};
-    GeneratorParam<bool> scale_x_{"scale_x", true};
-    GeneratorParam<bool> add_to_y_{"add_to_y", true};
+    GeneratorParam<bool> assertions_enabled_ = {"assertions_enabled", false};
+    GeneratorParam<bool> use_fma_ = {"use_fma", false};
+    GeneratorParam<bool> vectorize_ = {"vectorize", true};
+    GeneratorParam<int>  block_size_ = {"block_size", 1024};
+    GeneratorParam<bool> scale_x_ = {"scale_x", true};
+    GeneratorParam<bool> add_to_y_ = {"add_to_y", true};
 
     // Standard ordering of parameters in AXPY functions.
-    Input<T> a_{"a", 1};
-    Input<Buffer<T, 1>> x_{"x"};
-    Input<Buffer<T, 1>> y_{"y"};
+    Param<T>   a_ = {"a", 1.0};
+    ImageParam x_ = {type_of<T>(), 1, "x"};
+    ImageParam y_ = {type_of<T>(), 1, "y"};
 
-    Output<Buffer<T, 1>> result_{"result"};
+    void SetupTarget() {
+        if (!assertions_enabled_) {
+            target.set(get_target()
+                       .with_feature(Target::NoAsserts)
+                       .with_feature(Target::NoBoundsQuery));
+        }
+
+        if (use_fma_) {
+            target.set(get_target().with_feature(Target::FMA));
+        }
+    }
+
+    void Schedule(Func result, Expr width) {
+        Var i("i"), o("o");
+    }
 
     template<class Arg>
     Expr calc(Arg i) {
@@ -41,146 +54,176 @@ public:
         }
     }
 
-    void generate() {
-        assert(get_target().has_feature(Target::NoBoundsQuery));
+    Func build() {
+        SetupTarget();
 
-        const int vec_size = vectorize_ ? natural_vector_size(type_of<T>()) : 1;
+        const int vec_size = vectorize_? natural_vector_size(type_of<T>()): 1;
         Expr size = x_.width();
         Expr size_vecs = (size / vec_size) * vec_size;
         Expr size_tail = size - size_vecs;
 
-        Var i("i");
+        Var  i("i");
+        Func result("result");
         RDom vecs(0, size_vecs, "vec");
         RDom tail(size_vecs, size_tail, "tail");
-        result_(i) = undef(type_of<T>());
-        result_(vecs) = calc(vecs);
-        result_(tail) = calc(tail);
+        result(i) = undef(type_of<T>());
+        result(vecs) = calc(vecs);
+        result(tail) = calc(tail);
 
         if (vectorize_) {
             Var ii("ii");
-            result_.update().vectorize(vecs, vec_size);
+            result.update().vectorize(vecs, vec_size);
         }
-        result_.update(1).unscheduled();  // Leave the tail unvectorized
 
-        result_.bound(i, 0, x_.width());
-        result_.dim(0).set_bounds(0, x_.width());
+        result.bound(i, 0, x_.width());
+        result.output_buffer().set_bounds(0, 0, x_.width());
 
-        x_.dim(0).set_min(0);
-        y_.dim(0).set_bounds(0, x_.width());
+        x_.set_min(0, 0);
+        y_.set_bounds(0, 0, x_.width());
+
+        return result;
     }
 };
 
 // Generator class for BLAS dot operations.
 template<class T>
-class DotGenerator : public Generator<DotGenerator<T>> {
-public:
+class DotGenerator :
+        public Generator<DotGenerator<T>> {
+  public:
     typedef Generator<DotGenerator<T>> Base;
+    using Base::target;
     using Base::get_target;
     using Base::natural_vector_size;
-    using Base::target;
-    template<typename T2>
-    using Input = typename Base::template Input<T2>;
-    template<typename T2>
-    using Output = typename Base::template Output<T2>;
 
-    GeneratorParam<bool> vectorize_{"vectorize", true};
-    GeneratorParam<bool> parallel_{"parallel", true};
-    GeneratorParam<int> block_size_{"block_size", 1024};
+    GeneratorParam<bool> assertions_enabled_ = {"assertions_enabled", false};
+    GeneratorParam<bool> use_fma_ = {"use_fma", false};
+    GeneratorParam<bool> vectorize_ = {"vectorize", true};
+    GeneratorParam<bool> parallel_ = {"parallel", true};
+    GeneratorParam<int>  block_size_ = {"block_size", 1024};
 
-    Input<Buffer<T, 1>> x_{"x"};
-    Input<Buffer<T, 1>> y_{"y"};
+    ImageParam x_ = {type_of<T>(), 1, "x"};
+    ImageParam y_ = {type_of<T>(), 1, "y"};
 
-    Output<Buffer<T, 0>> result_{"result"};
+    void SetupTarget() {
+        if (!assertions_enabled_) {
+            target.set(get_target()
+                       .with_feature(Target::NoAsserts)
+                       .with_feature(Target::NoBoundsQuery));
+        }
 
-    void generate() {
-        assert(get_target().has_feature(Target::NoBoundsQuery));
+        if (use_fma_) {
+            target.set(get_target().with_feature(Target::FMA));
+        }
+    }
 
-        const int vec_size = vectorize_ ? natural_vector_size(type_of<T>()) : 1;
+    Func build() {
+        SetupTarget();
+
+        const int vec_size = vectorize_? natural_vector_size(type_of<T>()): 1;
         Expr size = x_.width();
         Expr size_vecs = size / vec_size;
         Expr size_tail = size - size_vecs * vec_size;
 
         Var i("i");
+        Func result;
         if (vectorize_) {
             Func dot;
 
             RDom k(0, size_vecs);
-            dot(i) += x_(k * vec_size + i) * y_(k * vec_size + i);
+            dot(i) += x_(k*vec_size + i) * y_(k*vec_size + i);
 
             RDom lanes(0, vec_size);
             RDom tail(size_vecs * vec_size, size_tail);
-            result_() = sum(dot(lanes));
-            result_() += sum(x_(tail) * y_(tail));
+            result(i) = undef<T>();
+            result(0) = sum(dot(lanes));
+            result(0) += sum(x_(tail) * y_(tail));
 
             dot.compute_root().vectorize(i);
             dot.update(0).vectorize(i);
         } else {
             RDom k(0, size);
-            result_() = sum(x_(k) * y_(k));
+            result(i) = undef<T>();
+            result(0) = sum(x_(k) * y_(k));
         }
 
-        x_.dim(0).set_bounds(0, size);
-        y_.dim(0).set_bounds(0, size);
+        x_.set_min(0, 0);
+        y_.set_bounds(0, 0, size);
+
+        return result;
     }
 };
 
 // Generator class for BLAS dot operations.
 template<class T>
-class AbsSumGenerator : public Generator<AbsSumGenerator<T>> {
-public:
+class AbsSumGenerator :
+        public Generator<AbsSumGenerator<T>> {
+  public:
     typedef Generator<AbsSumGenerator<T>> Base;
+    using Base::target;
     using Base::get_target;
     using Base::natural_vector_size;
-    using Base::target;
-    template<typename T2>
-    using Input = typename Base::template Input<T2>;
-    template<typename T2>
-    using Output = typename Base::template Output<T2>;
 
-    GeneratorParam<bool> vectorize_{"vectorize", true};
-    GeneratorParam<bool> parallel_{"parallel", true};
-    GeneratorParam<int> block_size_{"block_size", 1024};
+    GeneratorParam<bool> assertions_enabled_ = {"assertions_enabled", false};
+    GeneratorParam<bool> use_fma_ = {"use_fma", false};
+    GeneratorParam<bool> vectorize_ = {"vectorize", true};
+    GeneratorParam<bool> parallel_ = {"parallel", true};
+    GeneratorParam<int>  block_size_ = {"block_size", 1024};
 
-    Input<Buffer<T, 1>> x_{"x"};
+    ImageParam x_ = {type_of<T>(), 1, "x"};
 
-    Output<Buffer<T, 0>> result_{"result"};
+    void SetupTarget() {
+        if (!assertions_enabled_) {
+            target.set(get_target()
+                       .with_feature(Target::NoAsserts)
+                       .with_feature(Target::NoBoundsQuery));
+        }
 
-    void generate() {
-        assert(get_target().has_feature(Target::NoBoundsQuery));
+        if (use_fma_) {
+            target.set(get_target().with_feature(Target::FMA));
+        }
+    }
 
-        const int vec_size = vectorize_ ? natural_vector_size(type_of<T>()) : 1;
+    Func build() {
+        SetupTarget();
+
+        const int vec_size = vectorize_? natural_vector_size(type_of<T>()): 1;
         Expr size = x_.width();
         Expr size_vecs = size / vec_size;
         Expr size_tail = size - size_vecs * vec_size;
 
         Var i("i");
+        Func result;
         if (vectorize_) {
             Func norm;
 
             RDom k(0, size_vecs);
-            norm(i) += abs(x_(k * vec_size + i));
+            norm(i) += abs(x_(k*vec_size + i));
 
             RDom lanes(0, vec_size);
             RDom tail(size_vecs * vec_size, size_tail);
-            result_() = sum(norm(lanes));
-            result_() += sum(abs(x_(tail)));
+            result(i) = undef<T>();
+            result(0) = sum(norm(lanes));
+            result(0) += sum(abs(x_(tail)));
 
             norm.compute_root().vectorize(i);
             norm.update(0).vectorize(i);
         } else {
             RDom k(0, x_.width());
-            result_() = sum(abs(x_(k)));
+            result(i) = undef<T>();
+            result(0) = sum(abs(x_(k)));
         }
 
-        x_.dim(0).set_min(0);
+        x_.set_min(0, 0);
+
+        return result;
     }
 };
 
-}  // namespace
+RegisterGenerator<AXPYGenerator<float>>    register_saxpy("saxpy");
+RegisterGenerator<AXPYGenerator<double>>   register_daxpy("daxpy");
+RegisterGenerator<DotGenerator<float>>     register_sdot("sdot");
+RegisterGenerator<DotGenerator<double>>    register_ddot("ddot");
+RegisterGenerator<AbsSumGenerator<float>>  register_sasum("sasum");
+RegisterGenerator<AbsSumGenerator<double>> register_dasum("dasum");
 
-HALIDE_REGISTER_GENERATOR(AXPYGenerator<float>, saxpy)
-HALIDE_REGISTER_GENERATOR(AXPYGenerator<double>, daxpy)
-HALIDE_REGISTER_GENERATOR(DotGenerator<float>, sdot)
-HALIDE_REGISTER_GENERATOR(DotGenerator<double>, ddot)
-HALIDE_REGISTER_GENERATOR(AbsSumGenerator<float>, sasum)
-HALIDE_REGISTER_GENERATOR(AbsSumGenerator<double>, dasum)
+}  // namespace

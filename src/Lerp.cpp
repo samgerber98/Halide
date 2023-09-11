@@ -1,23 +1,19 @@
-#include <algorithm>
 #include <cmath>
+#include <algorithm>
 
-#include "CSE.h"
-#include "IR.h"
-#include "IROperator.h"
 #include "Lerp.h"
+#include "IROperator.h"
 #include "Simplify.h"
-#include "Target.h"
 
 namespace Halide {
 namespace Internal {
 
-Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight, const Target &target) {
+Expr lower_lerp(Expr zero_val, Expr one_val, Expr weight) {
 
     Expr result;
 
     internal_assert(zero_val.type() == one_val.type());
-    internal_assert(weight.type().is_uint() || weight.type().is_float())
-        << "Bad weight type: " << weight.type() << "\n";
+    internal_assert(weight.type().is_uint() || weight.type().is_float());
 
     Type result_type = zero_val.type();
 
@@ -37,14 +33,14 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
     // There is likely a better way to handle this.
     if (result_type != computation_type) {
         zero_val = Cast::make(computation_type, zero_val) - bias_value;
-        one_val = Cast::make(computation_type, one_val) - bias_value;
+        one_val =  Cast::make(computation_type, one_val)  - bias_value;
     }
 
     if (result_type.is_bool()) {
         Expr half_weight;
-        if (weight.type().is_float()) {
+        if (weight.type().is_float())
             half_weight = 0.5f;
-        } else {
+        else {
             half_weight = weight.type().max() / 2;
         }
 
@@ -63,7 +59,7 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
                     typed_weight =
                         Cast::make(computation_type,
                                    cast<double>(Expr(65535.0f)) * cast<double>(Expr(65537.0f)) *
-                                       Cast::make(Float(64, typed_weight.type().lanes()), typed_weight));
+                                   Cast::make(Float(64, typed_weight.type().lanes()), typed_weight));
                 } else {
                     typed_weight =
                         Cast::make(computation_type,
@@ -71,15 +67,24 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
                 }
                 inverse_typed_weight = computation_type.max() - typed_weight;
             } else {
-                inverse_typed_weight = make_one(computation_type) - typed_weight;
+                inverse_typed_weight = 1.0f - typed_weight;
             }
 
         } else {
             if (computation_type.is_float()) {
                 int weight_bits = weight.type().bits();
-                Expr denom = make_const(computation_type, (ldexp(1.0, weight_bits) - 1));
-                typed_weight = Cast::make(computation_type, weight) / denom;
-                inverse_typed_weight = make_one(computation_type) - typed_weight;
+                if (weight_bits == 32) {
+                    // Should use ldexp, but can't make Expr from result
+                    // that is double
+                    typed_weight =
+                        Cast::make(computation_type,
+                                   cast<double>(weight) / (pow(cast<double>(2), 32) - 1));
+                } else {
+                    typed_weight =
+                        Cast::make(computation_type,
+                                   weight / ((float)ldexp(1.0f, weight_bits) - 1));
+                }
+                inverse_typed_weight = 1.0f - typed_weight;
             } else {
                 // This code rescales integer weights to the right number of bits.
                 // It takes advantage of (2^n - 1) == (2^(n/2) - 1)(2^(n/2) + 1)
@@ -124,8 +129,8 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
         }
 
         if (computation_type.is_float()) {
-            result = (zero_val * inverse_typed_weight +
-                      one_val * typed_weight);
+            result = zero_val * inverse_typed_weight +
+                one_val * typed_weight;
         } else {
             int32_t bits = computation_type.bits();
             switch (bits) {
@@ -135,24 +140,19 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
             case 8:
             case 16:
             case 32: {
-                Expr prod_sum = (widening_mul(zero_val, inverse_typed_weight) +
-                                 widening_mul(one_val, typed_weight));
-                // Now we need to do a rounding divide and narrow. For
-                // 8-bit, this rounding divide looks like (x + 127) /
-                // 255. On most platforms it's we can compute this as
-                // ((x + 128) / 256 + x + 128) / 256. Note that
-                // overflow is impossible here because the most our
-                // prod_sum can be is 255^2.
-                if (target.arch == Target::X86) {
-                    // On x86 we have no rounding shifts but we do
-                    // have a multiply-keep-high-half. So it's
-                    // actually one instruction cheaper to do the
-                    // division directly.
-                    Expr divisor = cast(UInt(bits), -1);
-                    result = (prod_sum + divisor / 2) / divisor;
-                } else {
-                    result = rounding_shift_right(rounding_shift_right(prod_sum, bits) + prod_sum, bits);
-                }
+                Expr zero_expand = Cast::make(UInt(2 * bits, computation_type.lanes()),
+                                              zero_val);
+                Expr  one_expand = Cast::make(UInt(2 * bits, one_val.type().lanes()),
+                                              one_val);
+
+                Expr rounding = Cast::make(UInt(2 * bits), 1) << Cast::make(UInt(2 * bits), (bits - 1));
+                Expr divisor  = Cast::make(UInt(2 * bits), 1) << Cast::make(UInt(2 * bits), bits);
+
+                Expr prod_sum = zero_expand * inverse_typed_weight +
+                    one_expand * typed_weight + rounding;
+                Expr divided = ((prod_sum / divisor) + prod_sum) / divisor;
+
+                result = Cast::make(UInt(bits, computation_type.lanes()), divided);
                 break;
             }
             case 64:
@@ -164,26 +164,15 @@ Expr lower_lerp(Type final_type, Expr zero_val, Expr one_val, const Expr &weight
             default:
                 break;
             }
-
-            if (weight.type().is_float()) {
-                // Insert an explicit cast to the computation type, even if
-                // we're going to widen, because out-of-range floats can produce
-                // out-of-range outputs.
-                result = Cast::make(computation_type, result);
-            }
         }
 
-        if (!is_const_zero(bias_value)) {
+        if (!is_zero(bias_value)) {
             result = Cast::make(result_type, result + bias_value);
         }
     }
 
-    if (result.type() != final_type) {
-        result = Cast::make(final_type, result);
-    }
-
-    return simplify(common_subexpression_elimination(result));
+    return simplify(result);
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

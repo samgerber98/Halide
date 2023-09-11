@@ -8,19 +8,20 @@ Halide::Var x("x"), y("y"), c("c");
 
 class inverse_haar_x : public Halide::Generator<inverse_haar_x> {
 public:
-    Input<Buffer<float, 3>> in_{"in"};
-    Output<Buffer<float, 2>> out_{"out"};
+    ImageParam in_{ Float(32), 3, "in" };
 
-    void generate() {
+    Func build() {
         Func in = Halide::BoundaryConditions::repeat_edge(in_);
 
-        out_(x, y) = select(x % 2 == 0,
-                            in(x / 2, y, 0) + in(x / 2, y, 1),
-                            in(x / 2, y, 0) - in(x / 2, y, 1));
-        out_.unroll(x, 2);
+        Func out("out");
+        out(x, y) = select(x%2 == 0,
+                           in(x/2, y, 0) + in(x/2, y, 1),
+                           in(x/2, y, 0) - in(x/2, y, 1));
+        out.unroll(x, 2);
+        return out;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<inverse_haar_x> register_my_gen{"inverse_haar_x"};
 
-HALIDE_REGISTER_GENERATOR(inverse_haar_x, inverse_haar_x)
+}  // namespace

@@ -1,9 +1,10 @@
 #ifndef HALIDE_FLOAT16_H
 #define HALIDE_FLOAT16_H
-
 #include "runtime/HalideRuntime.h"
-#include <cstdint>
+#include <stdint.h>
 #include <string>
+#include "RoundingMode.h"
+#include "Util.h"
 
 namespace Halide {
 
@@ -12,266 +13,196 @@ namespace Halide {
  *
  *  This type is enforced to be 16-bits wide and maintains no state
  *  other than the raw IEEE754 binary16 bits so that it can passed
- *  to code that checks a type's size and used for halide_buffer_t allocation.
+ *  to code that checks a type's size and used for buffer_t allocation.
  * */
 struct float16_t {
-
-    static const int mantissa_bits = 10;
-    static const uint16_t sign_mask = 0x8000;
-    static const uint16_t exponent_mask = 0x7c00;
-    static const uint16_t mantissa_mask = 0x03ff;
+    // NOTE: Do not use virtual methods here
+    // it will change the size of this data type.
 
     /// \name Constructors
     /// @{
 
-    /** Construct from a float, double, or int using
-     * round-to-nearest-ties-to-even. Out-of-range values become +/-
-     * infinity.
+    /** Construct from a float using a particular rounding mode.
+     *  A warning will be emitted if the result cannot be represented exactly
+     *  and error will be raised if the conversion results in overflow.
+     *
+     *  \param value the input float
+     *  \param roundingMode The rounding mode to use
+     *
      */
-    // @{
-    explicit float16_t(float value);
-    explicit float16_t(double value);
-    explicit float16_t(int value);
-    // @}
+    EXPORT explicit float16_t(float value, RoundingMode roundingMode=RoundingMode::ToNearestTiesToEven);
+
+    /** Construct from a double using a particular rounding mode.
+     *  A warning will be emitted if the result cannot be represented exactly
+     *  and error will be raised if the conversion results in overflow.
+     *
+     *  \param value the input double
+     *  \param roundingMode The rounding mode to use
+     *
+     */
+    EXPORT explicit float16_t(double value, RoundingMode roundingMode=RoundingMode::ToNearestTiesToEven);
+
+    /** Construct by parsing a string using a particular rounding mode.
+     *  A warning will be emitted if the result cannot be represented exactly
+     *  and error will be raised if the conversion results in overflow.
+     *
+     *  \param stringRepr the input string. The string maybe in C99 hex format
+     *         (e.g. ``-0x1.000p-1``) or in a decimal (e.g.``-0.5``) format.
+     *
+     *  \param roundingMode The rounding mode to use
+     *
+     */
+    EXPORT explicit float16_t(const char *stringRepr, RoundingMode roundingMode=RoundingMode::ToNearestTiesToEven);
 
     /** Construct a float16_t with the bits initialised to 0. This represents
      * positive zero.*/
-    float16_t() = default;
-
-#ifdef HALIDE_CPP_COMPILER_HAS_FLOAT16
-    /** Construct a float16_t from compiler's built-in _Float16 type. */
-    explicit float16_t(_Float16 value) {
-        memcpy(&data, &value, sizeof(_Float16));
-    }
-#endif
+    EXPORT float16_t();
 
     /// @}
 
     // Use explicit to avoid accidently raising the precision
     /** Cast to float */
-    explicit operator float() const;
+    EXPORT explicit operator float() const;
     /** Cast to double */
-    explicit operator double() const;
-    /** Cast to int */
-    explicit operator int() const;
+    EXPORT explicit operator double() const;
 
-#ifdef HALIDE_CPP_COMPILER_HAS_FLOAT16
-    /** Cast to compiler's built-in _Float16 type. */
-    explicit operator _Float16() const {
-        _Float16 result;
-        memcpy(&result, &data, sizeof(_Float16));
-        return result;
-    }
-#endif
+    // Be explicit about how the copy constructor is expected to behave
+    EXPORT float16_t(const float16_t&) = default;
 
-    /** Get a new float16_t that represents a special value */
-    // @{
-    static float16_t make_zero();
-    static float16_t make_negative_zero();
-    static float16_t make_infinity();
-    static float16_t make_negative_infinity();
-    static float16_t make_nan();
-    // @}
+    // Be explicit about how assignment is expected to behave
+    EXPORT float16_t& operator=(const float16_t&) = default;
+
+    /** \name Convenience "constructors"
+     */
+    /**@{*/
+
+    /** Get a new float16_t that represents zero
+     * \param positive if true then returns positive zero otherwise returns
+     *        negative zero.
+     */
+    EXPORT static float16_t make_zero(bool positive);
+
+    /** Get a new float16_t that represents infinity
+     * \param positive if true then returns positive infinity otherwise returns
+     *        negative infinity.
+     */
+    EXPORT static float16_t make_infinity(bool positive);
+
+    /** Get a new float16_t that represents NaN (not a number) */
+    EXPORT static float16_t make_nan();
 
     /** Get a new float16_t with the given raw bits
      *
      * \param bits The bits conformant to IEEE754 binary16
      */
-    static float16_t make_from_bits(uint16_t bits);
+    EXPORT static float16_t make_from_bits(uint16_t bits);
+
+    /** Get a new float16_t from a signed integer.
+     *  It is not provided as a constructor to avoid call ambiguity
+     * */
+    EXPORT static float16_t make_from_signed_int(int64_t value, RoundingMode roundingMode=RoundingMode::ToNearestTiesToEven);
+    /**@}*/
+
+    /**\name Arithmetic operators
+     * These compute the result of an arithmetic operation
+     * using a particular ``roundingMode`` and return a new float16_t
+     * representing the result.
+     *
+     * Exceptions are ignored.
+     */
+    /**@{*/
+    /** add */
+    EXPORT float16_t add(float16_t rhs, RoundingMode roundingMode) const;
+    /** subtract */
+    EXPORT float16_t subtract(float16_t rhs, RoundingMode roundingMode) const;
+    /** multiply */
+    EXPORT float16_t multiply(float16_t rhs, RoundingMode roundingMode) const;
+    /** divide */
+    EXPORT float16_t divide(float16_t denominator, RoundingMode roundingMode) const;
+    /** IEEE-754 2008 5.3.1 General operations - remainder **/
+    EXPORT float16_t remainder(float16_t denominator) const;
+    /** C fmod() */
+    EXPORT float16_t mod(float16_t denominator, RoundingMode roudingMode) const;
+    /**@}*/
+
 
     /** Return a new float16_t with a negated sign bit*/
-    float16_t operator-() const;
+    EXPORT float16_t operator-() const;
 
-    /** Arithmetic operators. */
-    // @{
-    float16_t operator+(float16_t rhs) const;
-    float16_t operator-(float16_t rhs) const;
-    float16_t operator*(float16_t rhs) const;
-    float16_t operator/(float16_t rhs) const;
-    float16_t operator+=(float16_t rhs) {
-        return (*this = *this + rhs);
-    }
-    float16_t operator-=(float16_t rhs) {
-        return (*this = *this - rhs);
-    }
-    float16_t operator*=(float16_t rhs) {
-        return (*this = *this * rhs);
-    }
-    float16_t operator/=(float16_t rhs) {
-        return (*this = *this / rhs);
-    }
-    // @}
+    /** \name Overloaded arithmetic operators for convenience
+     * These operators assume RoundingMode::ToNearestTiesToEven rounding
+     */
+    /**@{*/
+    EXPORT float16_t operator+(float16_t rhs) const;
+    EXPORT float16_t operator-(float16_t rhs) const;
+    EXPORT float16_t operator*(float16_t rhs) const;
+    EXPORT float16_t operator/(float16_t rhs) const;
+    /**@}*/
 
-    /** Comparison operators */
-    // @{
-    bool operator==(float16_t rhs) const;
-    bool operator!=(float16_t rhs) const {
-        return !(*this == rhs);
-    }
-    bool operator>(float16_t rhs) const;
-    bool operator<(float16_t rhs) const;
-    bool operator>=(float16_t rhs) const {
-        return (*this > rhs) || (*this == rhs);
-    }
-    bool operator<=(float16_t rhs) const {
-        return (*this < rhs) || (*this == rhs);
-    }
-    // @}
+    /** \name Comparison operators */
+    /**@{*/
+    /** Equality */
+    EXPORT bool operator==(float16_t rhs) const;
+    /** Not equal */
+    EXPORT bool operator!=(float16_t rhs) const { return !(*this == rhs); }
+    /** Greater than */
+    EXPORT bool operator>(float16_t rhs) const;
+    /** Less than */
+    EXPORT bool operator<(float16_t rhs) const;
+    /** Greater than or equal to*/
+    EXPORT bool operator>=(float16_t rhs) const { return (*this > rhs) || (*this == rhs); }
+    /** Less than or equal to*/
+    EXPORT bool operator<=(float16_t rhs) const { return (*this < rhs) || (*this == rhs); }
+    /** \return true if and only if the float16_t and ``rhs`` are not ordered. E.g.
+     * NaN and a normalised number
+     */
+    EXPORT bool are_unordered(float16_t rhs) const;
+    /**@}*/
 
-    /** Properties */
-    // @{
-    bool is_nan() const;
-    bool is_infinity() const;
-    bool is_negative() const;
-    bool is_zero() const;
-    // @}
+    /** \name String output methods */
+    /**@{*/
+    /** Return a string in the C99 hex format (e.g.\ ``-0x1.000p-1``) that
+     * represents this float16_t precisely.
+     */
+    EXPORT std::string to_hex_string() const;
+    /** Returns a string in a decimal scientific notation (e.g.\ ``-5.0E-1``)
+     * that represents the closest decimal value to this float16_t precise to
+     * the number of significant digits requested.
+     *
+     * \param significantDigits The number of significant digits to use. If
+     *        set to ``0`` then string returned will have enough precision to
+     *        construct the same float16_t when using
+     *        RoundingMode::ToNearestTiesToEven
+     */
+    EXPORT std::string to_decimal_string(unsigned int significantDigits = 0) const;
+    /**@}*/
+
+    /** \name Properties */
+    /*@{*/
+    EXPORT bool is_nan() const;
+    EXPORT bool is_infinity() const;
+    EXPORT bool is_negative() const;
+    EXPORT bool is_zero() const;
+    /*@}*/
 
     /** Returns the bits that represent this float16_t.
      *
      *  An alternative method to access the bits is to cast a pointer
      *  to this instance as a pointer to a uint16_t.
      **/
-    uint16_t to_bits() const;
+    EXPORT uint16_t to_bits() const;
 
 private:
     // The raw bits.
-    uint16_t data = 0;
+    // This must be the **ONLY** data member so that
+    // this data type is 16-bits wide.
+    uint16_t data;
 };
-
-static_assert(sizeof(float16_t) == 2, "float16_t should occupy two bytes");
-
 }  // namespace Halide
 
 template<>
-HALIDE_ALWAYS_INLINE constexpr halide_type_t halide_type_of<Halide::float16_t>() {
+HALIDE_ALWAYS_INLINE inline halide_type_t halide_type_of<Halide::float16_t>() {
     return halide_type_t(halide_type_float, 16);
-}
-
-namespace Halide {
-
-/** Class that provides a type that implements half precision
- *  floating point using the bfloat16 format.
- *
- *  This type is enforced to be 16-bits wide and maintains no state
- *  other than the raw bits so that it can passed to code that checks
- *  a type's size and used for halide_buffer_t allocation. */
-struct bfloat16_t {
-
-    static const int mantissa_bits = 7;
-    static const uint16_t sign_mask = 0x8000;
-    static const uint16_t exponent_mask = 0x7f80;
-    static const uint16_t mantissa_mask = 0x007f;
-
-    static const bfloat16_t zero, negative_zero, infinity, negative_infinity, nan;
-
-    /// \name Constructors
-    /// @{
-
-    /** Construct from a float, double, or int using
-     * round-to-nearest-ties-to-even. Out-of-range values become +/-
-     * infinity.
-     */
-    // @{
-    explicit bfloat16_t(float value);
-    explicit bfloat16_t(double value);
-    explicit bfloat16_t(int value);
-    // @}
-
-    /** Construct a bfloat16_t with the bits initialised to 0. This represents
-     * positive zero.*/
-    bfloat16_t() = default;
-
-    /// @}
-
-    // Use explicit to avoid accidently raising the precision
-    /** Cast to float */
-    explicit operator float() const;
-    /** Cast to double */
-    explicit operator double() const;
-    /** Cast to int */
-    explicit operator int() const;
-
-    /** Get a new bfloat16_t that represents a special value */
-    // @{
-    static bfloat16_t make_zero();
-    static bfloat16_t make_negative_zero();
-    static bfloat16_t make_infinity();
-    static bfloat16_t make_negative_infinity();
-    static bfloat16_t make_nan();
-    // @}
-
-    /** Get a new bfloat16_t with the given raw bits
-     *
-     * \param bits The bits conformant to IEEE754 binary16
-     */
-    static bfloat16_t make_from_bits(uint16_t bits);
-
-    /** Return a new bfloat16_t with a negated sign bit*/
-    bfloat16_t operator-() const;
-
-    /** Arithmetic operators. */
-    // @{
-    bfloat16_t operator+(bfloat16_t rhs) const;
-    bfloat16_t operator-(bfloat16_t rhs) const;
-    bfloat16_t operator*(bfloat16_t rhs) const;
-    bfloat16_t operator/(bfloat16_t rhs) const;
-    bfloat16_t operator+=(bfloat16_t rhs) {
-        return (*this = *this + rhs);
-    }
-    bfloat16_t operator-=(bfloat16_t rhs) {
-        return (*this = *this - rhs);
-    }
-    bfloat16_t operator*=(bfloat16_t rhs) {
-        return (*this = *this * rhs);
-    }
-    bfloat16_t operator/=(bfloat16_t rhs) {
-        return (*this = *this / rhs);
-    }
-    // @}
-
-    /** Comparison operators */
-    // @{
-    bool operator==(bfloat16_t rhs) const;
-    bool operator!=(bfloat16_t rhs) const {
-        return !(*this == rhs);
-    }
-    bool operator>(bfloat16_t rhs) const;
-    bool operator<(bfloat16_t rhs) const;
-    bool operator>=(bfloat16_t rhs) const {
-        return (*this > rhs) || (*this == rhs);
-    }
-    bool operator<=(bfloat16_t rhs) const {
-        return (*this < rhs) || (*this == rhs);
-    }
-    // @}
-
-    /** Properties */
-    // @{
-    bool is_nan() const;
-    bool is_infinity() const;
-    bool is_negative() const;
-    bool is_zero() const;
-    // @}
-
-    /** Returns the bits that represent this bfloat16_t.
-     *
-     *  An alternative method to access the bits is to cast a pointer
-     *  to this instance as a pointer to a uint16_t.
-     **/
-    uint16_t to_bits() const;
-
-private:
-    // The raw bits.
-    uint16_t data = 0;
-};
-
-static_assert(sizeof(bfloat16_t) == 2, "bfloat16_t should occupy two bytes");
-
-}  // namespace Halide
-
-template<>
-HALIDE_ALWAYS_INLINE constexpr halide_type_t halide_type_of<Halide::bfloat16_t>() {
-    return halide_type_t(halide_type_bfloat, 16);
 }
 
 #endif

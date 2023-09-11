@@ -19,5 +19,6 @@ int main(int argc, char **argv) {
 
     // Any non-error is a success.
     printf("Success!\n");
+
     return 0;
 }

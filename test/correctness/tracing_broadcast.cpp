@@ -3,15 +3,14 @@
 
 using namespace Halide;
 
-int my_trace(JITUserContext *user_context, const halide_trace_event_t *e) {
+int my_trace(void *user_context, const halide_trace_event_t *e) {
     if (e->event == halide_trace_store) {
         for (int i = 0; i < e->type.lanes; ++i) {
             int val = ((const int *)(e->value))[i];
             if (val != 1234567890) {
                 printf("All values stored should have been 1234567890\n"
-                       "Instead they are: %d\n",
-                       val);
-                exit(1);
+                       "Instead they are: %d\n", val);
+                exit(-1);
             }
         }
     }
@@ -25,10 +24,11 @@ int main(int argc, char **argv) {
     f.vectorize(x, 8);
 
     f.trace_stores();
-    f.jit_handlers().custom_trace = &my_trace;
-    f.realize({8, 8});
+    f.set_custom_trace(&my_trace);
+    f.realize(8, 8);
 
     printf("Success!\n");
 
     return 0;
+
 }

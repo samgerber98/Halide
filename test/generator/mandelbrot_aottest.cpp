@@ -1,17 +1,16 @@
-#include <cmath>
-#include <stdint.h>
-#include <stdio.h>
+#include <math.h>
 #include <string.h>
+#include <stdio.h>
 
-#include "HalideBuffer.h"
 #include "mandelbrot.h"
+#include "HalideBuffer.h"
 
 using namespace Halide::Runtime;
 
 int main(int argc, char **argv) {
-    Buffer<int, 2> output(100, 30);
+    Buffer<int> output(100, 30);
     const char *code = " .:-~*={}&%#@";
-    const int iters = (int)strlen(code) - 1;
+    const int iters = (int) strlen(code) - 1;
 
     // Compute 100 different julia sets
     for (float t = 0; t < 100; t++) {

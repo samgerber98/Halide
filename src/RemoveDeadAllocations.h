@@ -6,7 +6,7 @@
  * are not used.
  */
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
@@ -15,9 +15,9 @@ namespace Internal {
  *  and remove them from the Stmt. This doesn't touch Realize/Call
  *  nodes and so must be called after storage_flattening.
  */
-Stmt remove_dead_allocations(const Stmt &s);
+Stmt remove_dead_allocations(Stmt s);
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

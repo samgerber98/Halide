@@ -6,7 +6,7 @@ int main(int argc, char **argv) {
     Target target = get_jit_target_from_environment();
 
     if (!target.has_gpu_feature() && !target.has_feature(Target::OpenGLCompute)) {
-        printf("[SKIP] No GPU target enabled.\n");
+        printf("This is a gpu-specific test. Skipping it\n");
         return 0;
     }
 
@@ -35,11 +35,11 @@ int main(int argc, char **argv) {
         assert(b.host_dirty());
 
         Func f;
-        Var x, y, tx, ty;
+        Var x, y;
         f(x, y) = a(x, y) + b(x, y) + 2;
-        f.gpu_tile(x, y, tx, ty, 8, 8, TailStrategy::Auto, d);
+        f.gpu_tile(x, y, 8, 8, TailStrategy::Auto, d);
 
-        Buffer<float> out = f.realize({100, 100});
+        Buffer<float> out = f.realize(100, 100);
 
         out.for_each_value([&](float f) {
             if (f != 7.0f) {

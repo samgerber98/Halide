@@ -13,46 +13,50 @@ namespace Internal {
 /** A code generator that emits posix code from a given Halide stmt. */
 class CodeGen_Posix : public CodeGen_LLVM {
 public:
+
     /** Create an posix code generator. Processor features can be
      * enabled using the appropriate arguments */
-    CodeGen_Posix(const Target &t);
+    CodeGen_Posix(Target t);
 
 protected:
+
     using CodeGen_LLVM::visit;
 
     /** Posix implementation of Allocate. Small constant-sized allocations go
      * on the stack. The rest go on the heap by calling "halide_malloc"
      * and "halide_free" in the standard library. */
     // @{
-    void visit(const Allocate *) override;
-    void visit(const Free *) override;
+    void visit(const Allocate *);
+    void visit(const Free *);
     // @}
+
+    /** It can be convenient for backends to assume there is extra
+     * padding beyond the end of a buffer to enable faster
+     * loads/stores. This function gets the padding required by the
+     * implementing target. */
+    virtual int allocation_padding(Type type) const;
 
     /** A struct describing heap or stack allocations. */
     struct Allocation {
         /** The memory */
-        llvm::Value *ptr = nullptr;
+        llvm::Value *ptr;
 
         /** Destructor stack slot for this allocation. */
-        llvm::Value *destructor = nullptr;
+        llvm::Value *destructor;
 
         /** Function to accomplish the destruction. */
-        llvm::Function *destructor_function = nullptr;
-
-        /** Pseudostack slot for this allocation. Non-null for
-         * allocations of type Stack with dynamic size. */
-        llvm::Value *pseudostack_slot = nullptr;
+        llvm::Function *destructor_function;
 
         /** The (Halide) type of the allocation. */
         Type type;
 
         /** How many bytes this allocation is, or 0 if not
          * constant. */
-        int constant_bytes = 0;
+        int constant_bytes;
 
         /** How many bytes of stack space used. 0 implies it was a
          * heap allocation. */
-        int stack_bytes = 0;
+        int stack_bytes;
 
         /** A unique name for this allocation. May not be equal to the
          * Allocate node name in cases where we detect multiple
@@ -64,9 +68,10 @@ protected:
      * we enter a new function. */
     Scope<Allocation> allocations;
 
-    std::string get_allocation_name(const std::string &n) override;
+    std::string get_allocation_name(const std::string &n);
 
 private:
+
     /** Stack allocations that were freed, but haven't gone out of
      * scope yet.  This allows us to re-use stack allocations when
      * they aren't being used. */
@@ -80,7 +85,7 @@ private:
      * list of its extents and its size. Fires a runtime assert
      * (halide_error) if the size overflows 2^31 -1, the maximum
      * positive number an int32_t can hold. */
-    llvm::Value *codegen_allocation_size(const std::string &name, Type type, const std::vector<Expr> &extents, const Expr &condition);
+    llvm::Value *codegen_allocation_size(const std::string &name, Type type, const std::vector<Expr> &extents);
 
     /** Allocates some memory on either the stack or the heap, and
      * returns an Allocation object describing it. For heap
@@ -95,16 +100,16 @@ private:
      *
      * When the allocation can be freed call 'free_allocation', and
      * when it goes out of scope call 'destroy_allocation'. */
-    Allocation create_allocation(const std::string &name, Type type, MemoryType memory_type,
-                                 const std::vector<Expr> &extents, const Expr &condition,
-                                 const Expr &new_expr, std::string free_function, int padding);
+    Allocation create_allocation(const std::string &name, Type type,
+                                 const std::vector<Expr> &extents,
+                                 Expr condition, Expr new_expr, std::string free_function);
 
     /** Free an allocation previously allocated with
      * create_allocation */
     void free_allocation(const std::string &name);
+
 };
 
-}  // namespace Internal
-}  // namespace Halide
+}}
 
 #endif

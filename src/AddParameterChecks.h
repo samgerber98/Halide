@@ -6,20 +6,21 @@
  * Defines the lowering pass that adds the assertions that validate
  * scalar parameters.
  */
-#include <vector>
 
-#include "Expr.h"
-#include "Target.h"
+#include "IR.h"
 
 namespace Halide {
+
+struct Target;
+
 namespace Internal {
 
 /** Insert checks to make sure that all referenced parameters meet
- * their constraints. Also injects any custom requirements provided
- * by the user. */
-Stmt add_parameter_checks(const std::vector<Stmt> &requirements, Stmt s, const Target &t);
+ * their constraints. */
+Stmt add_parameter_checks(Stmt s, const Target &t);
 
-}  // namespace Internal
-}  // namespace Halide
+
+}
+}
 
 #endif

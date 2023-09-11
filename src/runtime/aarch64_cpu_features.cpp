@@ -1,15 +1,13 @@
 #include "HalideRuntime.h"
-#include "cpu_features.h"
 
-namespace Halide {
-namespace Runtime {
-namespace Internal {
+namespace Halide { namespace Runtime { namespace Internal {
 
 WEAK CpuFeatures halide_get_cpu_features() {
     // AArch64 has no CPU-specific Features.
-    return CpuFeatures();
+    const uint64_t known = 0;
+    const uint64_t available = 0;
+    CpuFeatures features = {known, available};
+    return features;
 }
 
-}  // namespace Internal
-}  // namespace Runtime
-}  // namespace Halide
+}}} // namespace Halide::Runtime::Internal

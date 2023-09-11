@@ -5,16 +5,13 @@
  *
  * Provides Closure class.
  */
-#include <map>
-#include <string>
 
-#include "Buffer.h"
 #include "IR.h"
 #include "IRVisitor.h"
 #include "Scope.h"
+#include "Buffer.h"
 
 namespace Halide {
-
 namespace Internal {
 
 /** A helper class to manage closures. Walks over a statement and
@@ -25,85 +22,72 @@ namespace Internal {
  * own function (e.g. because it's the body of a parallel for loop. */
 class Closure : public IRVisitor {
 protected:
-    Scope<> ignore;
+    Scope<int> ignore;
+
+    // Indicates whether the pointer obtained by address_of is read or written.
+    // By default, assume address_of users read but not write.
+    bool address_of_read = true;
+    bool address_of_written = false;
 
     using IRVisitor::visit;
 
-    void visit(const Let *op) override;
-    void visit(const LetStmt *op) override;
-    void visit(const For *op) override;
-    void visit(const Load *op) override;
-    void visit(const Store *op) override;
-    void visit(const Allocate *op) override;
-    void visit(const Variable *op) override;
-    void visit(const Atomic *op) override;
+    void visit(const Let *op);
+    void visit(const LetStmt *op);
+    void visit(const For *op);
+    void visit(const Load *op);
+    void visit(const Store *op);
+    void visit(const Allocate *op);
+    void visit(const Variable *op);
+    void visit(const Call *op);
 
 public:
     /** Information about a buffer reference from a closure. */
-    struct Buffer {
+    struct Buffer
+    {
         /** The type of the buffer referenced. */
         Type type;
 
         /** The dimensionality of the buffer. */
-        uint8_t dimensions = 0;
+        uint8_t dimensions;
 
         /** The buffer is read from. */
-        bool read = false;
+        bool read;
 
         /** The buffer is written to. */
-        bool write = false;
-
-        /** The buffer is a texture */
-        MemoryType memory_type = MemoryType::Auto;
+        bool write;
 
         /** The size of the buffer if known, otherwise zero. */
-        size_t size = 0;
+        size_t size;
 
-        Buffer() = default;
+        Buffer() : dimensions(0), read(false), write(false), size(0) { }
     };
 
 protected:
     void found_buffer_ref(const std::string &name, Type type,
-                          bool read, bool written, const Halide::Buffer<> &image);
+                          bool read, bool written, Halide::Buffer<> image);
 
 public:
-    Closure() = default;
-
-    // Movable but not copyable.
-    Closure(const Closure &) = delete;
-    Closure &operator=(const Closure &) = delete;
-    Closure(Closure &&) = default;
-    Closure &operator=(Closure &&) = default;
+    Closure() {}
 
     /** Traverse a statement and find all references to external
      * symbols.
      *
      * When the closure encounters a read or write to 'foo', it
      * assumes that the host pointer is found in the symbol table as
-     * 'foo.host', and any halide_buffer_t pointer is found under
-     * 'foo.buffer'.
-     *
-     * Calling this multiple times (on multiple statements) is legal
-     * (and will produce a unified closure).
-     **/
-    void include(const Stmt &s, const std::string &loop_variable = "");
+     * 'foo.host', and any buffer_t pointer is found under
+     * 'foo.buffer'. */
+    Closure(Stmt s, const std::string &loop_variable = "");
 
-    /** External variables referenced. There's code that assumes iterating over
-     * this repeatedly gives a consistent order, so don't swap out the data type
-     * for something non-deterministic. */
+    /** External variables referenced. */
     std::map<std::string, Type> vars;
 
     /** External allocations referenced. */
     std::map<std::string, Buffer> buffers;
 
-    /** Pack a closure into a struct. */
-    Expr pack_into_struct() const;
-
-    /** Unpack a closure around a Stmt, putting all the names in scope. */
-    Stmt unpack_from_struct(const Expr &, const Stmt &) const;
+    /** The Halide names of the external symbols (in the same order as llvm_types). */
+    std::vector<std::string> names() const;
 };
 
-}  // namespace Internal
-}  // namespace Halide
+}}
 
 #endif

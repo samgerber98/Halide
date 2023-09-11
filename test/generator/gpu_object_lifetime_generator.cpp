@@ -4,21 +4,23 @@ namespace {
 
 class GpuObjectLifetime : public Halide::Generator<GpuObjectLifetime> {
 public:
-    Output<Buffer<int32_t, 1>> output{"output"};
-
-    void generate() {
+    Func build() {
         Var x;
 
-        output(x) = x;
+        Func f;
+        f(x) = x;
 
         Target target = get_target();
         if (target.has_gpu_feature()) {
             Var xo, xi;
-            output.gpu_tile(x, xo, xi, 16);
+            f.gpu_tile(x, xo, xi, 16);
         }
+        // The test requires gpu_debug to examine the output.
+        target.set_feature(Target::Debug);
+        return f;
     }
 };
 
-}  // namespace
+Halide::RegisterGenerator<GpuObjectLifetime> register_my_gen{"gpu_object_lifetime"};
 
-HALIDE_REGISTER_GENERATOR(GpuObjectLifetime, gpu_object_lifetime)
+}  // namespace

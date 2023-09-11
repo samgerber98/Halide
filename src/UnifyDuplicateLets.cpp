@@ -1,6 +1,6 @@
 #include "UnifyDuplicateLets.h"
-#include "IREquality.h"
 #include "IRMutator.h"
+#include "IREquality.h"
 #include <map>
 
 namespace Halide {
@@ -8,8 +8,6 @@ namespace Internal {
 
 using std::map;
 using std::string;
-
-namespace {
 
 class UnifyDuplicateLets : public IRMutator {
     using IRMutator::visit;
@@ -21,58 +19,60 @@ class UnifyDuplicateLets : public IRMutator {
 public:
     using IRMutator::mutate;
 
-    Expr mutate(const Expr &e) override {
+    Expr mutate(Expr e) {
+
         if (e.defined()) {
             map<Expr, string, IRDeepCompare>::iterator iter = scope.find(e);
             if (iter != scope.end()) {
-                return Variable::make(e.type(), iter->second);
+                expr = Variable::make(e.type(), iter->second);
             } else {
-                return IRMutator::mutate(e);
+                e.accept(this);
             }
         } else {
-            return Expr();
+            expr = Expr();
         }
+        stmt = Stmt();
+        return expr;
     }
 
 protected:
-    Expr visit(const Variable *op) override {
+    void visit(const Variable *op) {
         map<string, string>::iterator iter = rewrites.find(op->name);
         if (iter != rewrites.end()) {
-            return Variable::make(op->type, iter->second);
+            expr = Variable::make(op->type, iter->second);
         } else {
-            return op;
+            expr = op;
         }
     }
 
     // Can't unify lets where the RHS might be not be pure
     bool is_impure;
-    Expr visit(const Call *op) override {
+    void visit(const Call *op) {
         is_impure |= !op->is_pure();
-        return IRMutator::visit(op);
+        IRMutator::visit(op);
     }
 
-    Expr visit(const Load *op) override {
-        is_impure = true;
-        return IRMutator::visit(op);
+    void visit(const Load *op) {
+        is_impure |= ((op->name == producing) ||
+                      starts_with(op->name + ".", producing));
+        IRMutator::visit(op);
     }
 
-    Stmt visit(const ProducerConsumer *op) override {
+    void visit(const ProducerConsumer *op) {
         if (op->is_producer) {
             string old_producing = producing;
             producing = op->name;
-            Stmt stmt = IRMutator::visit(op);
+            IRMutator::visit(op);
             producing = old_producing;
-            return stmt;
         } else {
-            return IRMutator::visit(op);
+            IRMutator::visit(op);
         }
     }
 
-    template<typename LetStmtOrLet>
-    auto visit_let(const LetStmtOrLet *op) -> decltype(op->body) {
+    void visit(const LetStmt *op) {
         is_impure = false;
         Expr value = mutate(op->value);
-        auto body = op->body;
+        Stmt body = op->body;
 
         bool should_pop = false;
         bool should_erase = false;
@@ -99,26 +99,16 @@ protected:
         }
 
         if (value.same_as(op->value) && body.same_as(op->body)) {
-            return op;
+            stmt = op;
         } else {
-            return LetStmtOrLet::make(op->name, value, body);
+            stmt = LetStmt::make(op->name, value, body);
         }
-    }
-
-    Expr visit(const Let *op) override {
-        return visit_let(op);
-    }
-
-    Stmt visit(const LetStmt *op) override {
-        return visit_let(op);
     }
 };
 
-}  // namespace
-
-Stmt unify_duplicate_lets(const Stmt &s) {
+Stmt unify_duplicate_lets(Stmt s) {
     return UnifyDuplicateLets().mutate(s);
 }
 
-}  // namespace Internal
-}  // namespace Halide
+}
+}

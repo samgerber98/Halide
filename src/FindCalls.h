@@ -7,15 +7,11 @@
  */
 
 #include <map>
-#include <string>
-#include <vector>
 
-#include "Expr.h"
+#include "IR.h"
 
 namespace Halide {
 namespace Internal {
-
-class Function;
 
 /** Construct a map from name to Function definition object for all Halide
  *  functions called directly in the definition of the Function f, including
@@ -23,20 +19,16 @@ class Function;
  *  _does not_ include the Function f, unless it is called recursively by
  *  itself.
  */
-std::map<std::string, Function> find_direct_calls(const Function &f);
+std::map<std::string, Function> find_direct_calls(Function f);
 
 /** Construct a map from name to Function definition object for all Halide
  *  functions called directly in the definition of the Function f, or
  *  indirectly in those functions' definitions, recursively. This map always
  *  _includes_ the Function f.
  */
-std::map<std::string, Function> find_transitive_calls(const Function &f);
+std::map<std::string, Function> find_transitive_calls(Function f);
 
-/** Find all Functions transitively referenced by any Function in `funcs` and return
- * a map of them. */
-std::map<std::string, Function> build_environment(const std::vector<Function> &funcs);
-
-}  // namespace Internal
-}  // namespace Halide
+}
+}
 
 #endif

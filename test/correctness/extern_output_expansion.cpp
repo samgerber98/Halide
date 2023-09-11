@@ -1,30 +1,47 @@
 #include "Halide.h"
 #include <stdio.h>
 
+#ifdef _WIN32
+#define DLLEXPORT __declspec(dllexport)
+#else
+#define DLLEXPORT
+#endif
+
 // out(x) = in(x) * x;
-extern "C" HALIDE_EXPORT_SYMBOL int extern_stage(halide_buffer_t *in, halide_buffer_t *out) {
-    assert(in->type == halide_type_of<int>());
-    assert(out->type == halide_type_of<int>());
+extern "C" DLLEXPORT int extern_stage(buffer_t *in, buffer_t *out) {
+    assert(in->elem_size == 4);
+    assert(out->elem_size == 4);
     if (in->host == nullptr || out->host == nullptr) {
         // We require input size = output size, and just for fun,
         // we'll require that the output size must be a multiple of 17
 
-        if (out->is_bounds_query()) {
-            out->dim[0].extent = ((out->dim[0].extent + 16) / 17) * 17;
+        /*
+        printf("Query with in: %d %d, out: %d %d\n",
+               in->min[0], in->extent[0],
+               out->min[0], out->extent[0]);
+        */
+
+        if (out->host == nullptr) {
+            out->extent[0] = ((out->extent[0] + 16)/17)*17;
         }
-        if (in->is_bounds_query()) {
-            in->dim[0].extent = out->dim[0].extent;
-            in->dim[0].min = out->dim[0].min;
+        if (in->host == nullptr) {
+            in->extent[0] = out->extent[0];
+            in->min[0] = out->min[0];
         }
 
+        /*
+        printf("Query result in: %d %d, out: %d %d\n",
+               in->min[0], in->extent[0],
+               out->min[0], out->extent[0]);
+        */
     } else {
+        assert(out->extent[0] % 17 == 0);
         printf("in: %d %d, out: %d %d\n",
-               in->dim[0].min, in->dim[0].extent,
-               out->dim[0].min, out->dim[0].extent);
-        assert(out->dim[0].extent % 17 == 0);
-        int32_t *in_origin = (int32_t *)in->host - in->dim[0].min;
-        int32_t *out_origin = (int32_t *)out->host - out->dim[0].min;
-        for (int i = out->dim[0].min; i < out->dim[0].min + out->dim[0].extent; i++) {
+               in->min[0], in->extent[0],
+               out->min[0], out->extent[0]);
+        int32_t *in_origin = (int32_t *)in->host - in->min[0];
+        int32_t *out_origin = (int32_t *)out->host - out->min[0];
+        for (int i = out->min[0]; i < out->min[0] + out->extent[0]; i++) {
             out_origin[i] = in_origin[i] * i;
         }
     }
@@ -39,7 +56,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 2; i++) {
         Func f, g, h;
         Var x;
-        f(x) = x * x;
+        f(x) = x*x;
 
         g.define_extern("extern_stage", {f}, Int(32), 1);
 
@@ -55,13 +72,13 @@ int main(int argc, char **argv) {
             g.compute_root();
         }
 
-        Buffer<int32_t> result = h.realize({100});
+        Buffer<int32_t> result = h.realize(100);
 
         for (int i = 0; i < 100; i++) {
-            int32_t correct = i * i * i * 2;
+            int32_t correct = i*i*i*2;
             if (result(i) != correct) {
                 printf("result(%d) = %d instead of %d\n", i, result(i), correct);
-                return 1;
+                return -1;
             }
         }
     }
